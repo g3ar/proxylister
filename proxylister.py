@@ -4,10 +4,11 @@ Fetch free proxies from ProxyScrape (all protocols), check which are alive,
 and geolocate each working proxy's exit IP.
 
 Usage:
-    python proxylister.py [--timeout 5] [--workers 50] [--output working.txt]
+    python proxylister.py [--timeout 5] [--workers 50] [--output working.txt] [--max-latency 500]
 """
 
 import argparse
+import os
 import re
 import sys
 import concurrent.futures
@@ -63,8 +64,11 @@ def check_proxy(protocol, proxy, timeout=5):
     """
     Check whether a proxy is alive and geolocate its exit IP.
 
-    Returns a dict with protocol, proxy, ok, country, lat, lon on success,
-    or ok=False on failure.
+    Returns a dict with protocol, proxy, ok, country, lat, lon, latency_ms
+    on success, or ok=False on failure. latency_ms is response.elapsed —
+    the time from request-sent to response-headers-received — which reflects
+    pure network round trip (proxy connect + handshake + forward + reply)
+    with no local JSON-parsing or scheduling overhead mixed in.
     """
     conn = connection_string(protocol, proxy)
     proxies = {"http": conn, "https": conn}
@@ -79,35 +83,56 @@ def check_proxy(protocol, proxy, timeout=5):
                 "country": data.get("country", "Unknown"),
                 "lat": data.get("lat"),
                 "lon": data.get("lon"),
+                "latency_ms": round(r.elapsed.total_seconds() * 1000),
             }
     except (requests.RequestException, ValueError):
         pass
     return {"protocol": protocol, "proxy": proxy, "ok": False}
 
 
-def print_progress_bar(done, total, working_count, bar_width=40):
-    """Render an in-place CLI progress bar: [####----] 42/100 (7 working)"""
+def print_progress_bar(done, total, working_count, valid_count=None, bar_width=40):
+    """Render an in-place CLI progress bar: [####----] 42/100 (7 working, 3 valid)"""
     fraction = done / total if total else 1
     filled = int(bar_width * fraction)
     bar = "#" * filled + "-" * (bar_width - filled)
     pct = int(fraction * 100)
-    sys.stdout.write(f"\r[{bar}] {pct:3d}% ({done}/{total}, {working_count} working)")
+    counts = f"{working_count} working"
+    if valid_count is not None:
+        counts += f", {valid_count} valid"
+    sys.stdout.write(f"\r[{bar}] {pct:3d}% ({done}/{total}, {counts})")
     sys.stdout.flush()
 
 
 def format_result(result):
-    """Build the "protocol server:port <conn> <country> <lat,lon> <maps link>" output line."""
+    """Build the "<latency> protocol server:port <conn> <country> <lat,lon> <maps link>" output line."""
     conn = connection_string(result["protocol"], result["proxy"])
     coords = f"{result['lat']},{result['lon']}"
     maps_link = f"https://www.google.com/maps?q={coords}"
-    return f"{result['protocol']} {result['proxy']} {conn} {result['country']} {coords} {maps_link}"
+    return (
+        f"{result['latency_ms']}ms {result['protocol']} {result['proxy']} "
+        f"{conn} {result['country']} {coords} {maps_link}"
+    )
 
 
-def save_working(working, output_path):
-    """Write only confirmed-working proxy lines to the output file."""
+def save_working(working, output_path, max_latency_ms=None):
+    """
+    Sort confirmed-working results by latency (low to high) and write to a
+    single output file. If max_latency_ms is given, only proxies with lower
+    latency than that threshold are kept; otherwise all working proxies are
+    written.
+    """
+    working.sort(key=lambda result: result["latency_ms"])
+    if max_latency_ms is not None:
+        working = [r for r in working if r["latency_ms"] < max_latency_ms]
+
+    lines = [format_result(result) for result in working]
     with open(output_path, "w") as f:
-        f.write("\n".join(working) + ("\n" if working else ""))
-    print(f"Saved {len(working)} working proxies to {output_path}")
+        f.write("\n".join(lines) + ("\n" if lines else ""))
+
+    if max_latency_ms is not None:
+        print(f"Saved {len(lines)} proxies faster than {max_latency_ms}ms to {output_path}")
+    else:
+        print(f"Saved {len(lines)} working proxies to {output_path}, sorted by latency (low to high)")
 
 
 def main():
@@ -117,6 +142,12 @@ def main():
     parser.add_argument("--timeout", type=float, default=5, help="Seconds to wait per proxy check")
     parser.add_argument("--workers", type=int, default=50, help="Number of concurrent workers")
     parser.add_argument("--output", default="working_proxies.txt", help="File to save working proxies to")
+    parser.add_argument(
+        "--max-latency",
+        type=float,
+        default=None,
+        help="Only keep proxies with latency lower than this (ms). If omitted, all working proxies are saved.",
+    )
     args = parser.parse_args()
 
     print("Fetching proxy lists from ProxyScrape (http, socks4, socks5)...")
@@ -131,6 +162,9 @@ def main():
 
     working = []
     total = len(entries)
+    working_count = 0
+    valid_count = 0
+    interrupted = False
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=args.workers)
     try:
         futures = [
@@ -142,19 +176,29 @@ def main():
             result = future.result()
             done += 1
             if result["ok"]:
-                working.append(format_result(result))
-            print_progress_bar(done, total, len(working))
-        print(f"\n\n{len(working)}/{total} proxies are working.")
+                working.append(result)
+                working_count += 1
+                if args.max_latency is not None and result["latency_ms"] < args.max_latency:
+                    valid_count += 1
+            print_progress_bar(done, total, working_count, valid_count if args.max_latency is not None else None)
+        print(f"\n\n{working_count}/{total} proxies are working.")
     except KeyboardInterrupt:
-        print("\n\nInterrupted — stopping remaining checks...")
-        # cancel_futures skips any not-yet-started checks; in-flight ones are
-        # still awaited briefly by shutdown() below so we don't lose results
-        # for requests that were seconds from finishing.
-        executor.shutdown(wait=False, cancel_futures=True)
-        print(f"{len(working)} proxies confirmed working before interrupt.")
+        interrupted = True
+        print(f"\n\nInterrupted — stopping. {working_count} proxies confirmed working so far.")
     finally:
-        executor.shutdown(wait=True, cancel_futures=True)
-        save_working(working, args.output)
+        if interrupted:
+            # Don't block here: any still-running checks are stuck in a
+            # blocking socket call (connect/read timeout) that won't notice
+            # cancellation, and they're non-daemon threads — waiting on them,
+            # or even letting the interpreter's normal atexit cleanup wait on
+            # them, can hang or print noisy tracebacks on a further Ctrl+C.
+            # Save what we have and exit immediately, skipping that wait.
+            executor.shutdown(wait=False, cancel_futures=True)
+            save_working(working, args.output, args.max_latency)
+            os._exit(0)
+        else:
+            executor.shutdown(wait=True, cancel_futures=True)
+            save_working(working, args.output, args.max_latency)
 
 
 if __name__ == "__main__":

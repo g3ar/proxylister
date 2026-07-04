@@ -7,7 +7,7 @@ A simple Python CLI tool that fetches free proxies from [ProxyScrape](https://pr
 - Fetches proxies for all protocols — `http`, `socks4`, `socks5` — via ProxyScrape's public API
 - Checks proxy availability concurrently using a thread pool
 - Geolocates each working proxy's exit IP (country + GPS coordinates) via [ip-api.com](http://ip-api.com)
-- Outputs only working proxies, both to the CLI and to a file, with a ready-to-use browser connection string and a Google Maps link
+- Outputs only working proxies, sorted by latency, optionally filtered to only proxies faster than a given threshold, with a ready-to-use browser connection string and a Google Maps link
 
 ## Requirements
 
@@ -37,10 +37,10 @@ python proxylister.py [options]
 ### Example
 
 ```bash
-python proxylister.py --timeout 5 --workers 50 --output working.txt
+python proxylister.py --timeout 5 --workers 50 --output working.txt --max-latency 500
 ```
 
-This fetches http, socks4, and socks5 proxies, tests each with a 5-second timeout using 50 concurrent workers, and saves the working ones to `working.txt`.
+This fetches http, socks4, and socks5 proxies, tests each with a 5-second timeout using 50 concurrent workers, and saves only proxies faster than 500ms to `working.txt`. Omit `--max-latency` to save all working proxies regardless of latency.
 
 ### Options
 
@@ -49,6 +49,7 @@ This fetches http, socks4, and socks5 proxies, tests each with a 5-second timeou
 | `--timeout` | Seconds to wait per proxy check | `5` |
 | `--workers` | Number of concurrent worker threads | `50` |
 | `--output` | File to save working proxies to | `working_proxies.txt` |
+| `--max-latency` | Only keep proxies with latency lower than this (ms). If omitted, all working proxies are saved. | none (no filter) |
 
 ## CLI Output
 
@@ -64,18 +65,19 @@ Press **Ctrl+C** at any time to stop early. In-progress checks are dropped, and 
 
 ## File Output Format
 
-Detailed results are written only to the output file, one working proxy per line:
+Confirmed-working results are written to the output file once the script stops, sorted by latency from low to high, one proxy per line. If `--max-latency` is given, only proxies with lower latency than that threshold are included; otherwise all working proxies are written:
 
 ```
-protocol server:port <connection string> <country> <lat,lon> <google maps link>
+<latency> protocol server:port <connection string> <country> <lat,lon> <google maps link>
 ```
 
 Example:
 
 ```
-socks5 62.133.62.207:1081 socks5://62.133.62.207:1081 Germany 51.2993,9.491 https://www.google.com/maps?q=51.2993,9.491
+842ms socks5 62.133.62.207:1081 socks5://62.133.62.207:1081 Germany 51.2993,9.491 https://www.google.com/maps?q=51.2993,9.491
 ```
 
+- **latency** — round-trip time of the check request (`response.elapsed`), i.e. pure network time: proxy connect + handshake + forward + reply, with no local JSON-parsing or scheduling overhead included
 - **connection string** — ready to paste into a browser's or OS's proxy settings
 - **country / lat,lon** — geolocation of the proxy's exit IP
 - **google maps link** — opens that location directly on Google Maps
@@ -85,9 +87,9 @@ Dead or unreachable proxies are silently skipped — only working ones appear in
 ## How It Works
 
 1. Fetches raw proxy lists (one per protocol) from ProxyScrape's API and extracts `ip:port` pairs.
-2. For each proxy, makes a single request through it to `ip-api.com`, which both confirms the proxy is alive and returns the geolocation of its exit IP.
+2. For each proxy, makes a single request through it to `ip-api.com`, which both confirms the proxy is alive, returns the geolocation of its exit IP, and times the round trip to record as network latency.
 3. Updates a live progress bar in the CLI as checks complete.
-4. Writes all confirmed-working proxy lines, with full detail, to the output file — whether the run finishes normally or is stopped early with Ctrl+C.
+4. Sorts confirmed-working results by latency and, if `--max-latency` was given, filters out anything at or above it, then writes the result to the output file — whether the run finishes normally or is stopped early with Ctrl+C.
 
 ## Project Structure
 
@@ -102,6 +104,7 @@ proxylister/
 - Free proxies are often short-lived and unreliable, so expect a low success rate.
 - `ip-api.com`'s free tier is HTTP only and rate-limited to 45 requests/minute per source IP — since each lookup goes out through a different proxy IP, this limit rarely comes into play.
 - Increase `--timeout` if you're on a slow connection, or `--workers` for faster checking (at the cost of more open connections).
+- Use `--max-latency` to cut out proxies slower than your use case can tolerate; omit it to keep everything that works.
 
 ## License
 
