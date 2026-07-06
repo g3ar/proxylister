@@ -36,6 +36,9 @@ GEO_URL = "http://ip-api.com/json/?fields=status,country,lat,lon,query"
 # How long a verified proxy's browser window stays open before moving on.
 CHECK_URL_HOLD_SECONDS = 10
 
+# Floor for the derived Selenium page-load timeout (seconds) — see main().
+MIN_PAGE_LOAD_TIMEOUT = 10
+
 
 def fetch_proxy_list(protocol, timeout_ms=10000, country="all"):
     """Fetch raw proxy list text from the ProxyScrape API and extract ip:port pairs."""
@@ -53,7 +56,7 @@ def fetch_proxy_list(protocol, timeout_ms=10000, country="all"):
 
 
 def fetch_all_proxies():
-    """Fetch proxies for every supported protocol. Returns a list of (protocol, ip:port)."""
+    """Fetch proxies for every supported protocol. Returns a deduplicated list of (protocol, ip:port)."""
     entries = []
     for protocol in PROTOCOLS:
         try:
@@ -63,7 +66,24 @@ def fetch_all_proxies():
             continue
         print(f"  {protocol}: {len(proxies)} proxies")
         entries.extend((protocol, p) for p in proxies)
-    return entries
+
+    # The same ip:port can show up under more than one protocol's list (e.g.
+    # ProxyScrape returning it for both http and socks5) — dedupe by ip:port
+    # alone, keeping whichever protocol it was first seen under, so the same
+    # physical proxy isn't checked (and potentially saved) more than once.
+    deduped = []
+    seen = set()
+    for protocol, proxy in entries:
+        if proxy in seen:
+            continue
+        seen.add(proxy)
+        deduped.append((protocol, proxy))
+
+    duplicate_count = len(entries) - len(deduped)
+    if duplicate_count:
+        print(f"  Filtered {duplicate_count} duplicate ip:port entries across protocol lists")
+
+    return deduped
 
 
 def connection_string(protocol, proxy):
@@ -101,8 +121,8 @@ def check_proxy(protocol, proxy, timeout=5):
     return {"protocol": protocol, "proxy": proxy, "ok": False}
 
 
-def print_progress_bar(done, total, working_count, valid_count=None, bar_width=40):
-    """Render an in-place CLI progress bar: [####----] 42/100 (7 working, 3 valid)"""
+def print_progress_bar(done, total, working_count, valid_count=None, selenium_verified_count=None, bar_width=40):
+    """Render an in-place CLI progress bar: [####----] 42/100 (7 working, 3 valid, 1 selenium verified)"""
     fraction = done / total if total else 1
     filled = int(bar_width * fraction)
     bar = "#" * filled + "-" * (bar_width - filled)
@@ -110,6 +130,8 @@ def print_progress_bar(done, total, working_count, valid_count=None, bar_width=4
     counts = f"{working_count} working"
     if valid_count is not None:
         counts += f", {valid_count} valid"
+    if selenium_verified_count is not None:
+        counts += f", {selenium_verified_count} selenium verified"
     sys.stdout.write(f"\r[{bar}] {pct:3d}% ({done}/{total}, {counts})")
     sys.stdout.flush()
 
@@ -172,14 +194,15 @@ def verify_proxy_via_selenium(result, check_url, page_load_timeout, headless):
     """
     Open check_url through this one proxy using Selenium/Chrome. On success,
     holds the browser open for CHECK_URL_HOLD_SECONDS before closing it and
-    returns True. On any page error — a Selenium/timeout exception, Chrome's
-    internal network-error page, or an HTTP error status on the main
-    document — closes the browser immediately with no wait and returns
-    False. A KeyboardInterrupt closes the browser (via finally) and then
-    propagates to the caller.
+    returns True (skipped in headless mode, since there's nothing to
+    visually confirm). On any page error — a Selenium/timeout exception,
+    Chrome's internal network-error page, or an HTTP error status on the
+    main document — closes the browser immediately with no wait and
+    returns False. A KeyboardInterrupt closes the browser (via finally) and
+    then propagates to the caller. Doesn't print anything itself; the
+    caller's progress bar reflects verified counts.
     """
     conn = connection_string(result["protocol"], result["proxy"])
-    print(f"\nchecking {check_url} via {conn}")
 
     options = webdriver.ChromeOptions()
     options.add_argument(f"--proxy-server={conn}")
@@ -221,17 +244,14 @@ def verify_proxy_via_selenium(result, check_url, page_load_timeout, headless):
             page_error = f"page failed to load (HTTP {final_status})"
 
         if page_error:
-            print(f"  {page_error} — closing and dropping this proxy.")
             driver.quit()
             driver = None
             return False
 
-        print(f"  Loaded OK — holding browser open for {CHECK_URL_HOLD_SECONDS}s...")
-        time.sleep(CHECK_URL_HOLD_SECONDS)
+        if not headless:
+            time.sleep(CHECK_URL_HOLD_SECONDS)
         return True
-    except (TimeoutException, WebDriverException) as e:
-        reason = str(e).splitlines()[0] if str(e) else type(e).__name__
-        print(f"  Page error ({reason}) — closing and dropping this proxy.")
+    except (TimeoutException, WebDriverException):
         return False
     finally:
         # Safety net for any path above that didn't already close the
@@ -260,7 +280,8 @@ def main():
         "--check-url",
         default=None,
         help="URL to open via Selenium through each proxy as soon as it's found valid, as an extra "
-        "validation layer. The Selenium page-load timeout is derived as 2x --max-latency.",
+        f"validation layer. The Selenium page-load timeout is 2x --max-latency, floored at "
+        f"{MIN_PAGE_LOAD_TIMEOUT}s.",
     )
     parser.add_argument(
         "--headless",
@@ -272,7 +293,12 @@ def main():
     # Selenium's page-load timeout (seconds) is derived from --max-latency
     # (ms): a proxy that's already fast enough to pass the latency filter
     # gets twice that long, in seconds-equivalent terms, to load a real page.
-    page_load_timeout = (args.max_latency * 2) / 1000.0
+    # Floored at MIN_PAGE_LOAD_TIMEOUT since --max-latency measures a tiny
+    # JSON API round trip, not a full browser page load (Chrome startup,
+    # proxy tunnel, DNS, TLS, rendering) — at low --max-latency values, 2x
+    # alone would be too short for ChromeDriver's own timeout accounting to
+    # function correctly, let alone for any real page to actually load.
+    page_load_timeout = max((args.max_latency * 2) / 1000.0, MIN_PAGE_LOAD_TIMEOUT)
 
     print("Fetching proxy lists from ProxyScrape (http, socks4, socks5)...")
     entries = fetch_all_proxies()
@@ -289,6 +315,7 @@ def main():
     total = len(entries)
     working_count = 0
     valid_count = 0
+    selenium_verified_count = 0
     interrupted = False
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=args.workers)
     try:
@@ -314,7 +341,11 @@ def main():
                         result, args.check_url, page_load_timeout, args.headless
                     ):
                         verified.append(result)
-            print_progress_bar(done, total, working_count, valid_count)
+                        selenium_verified_count += 1
+            print_progress_bar(
+                done, total, working_count, valid_count,
+                selenium_verified_count if args.check_url else None,
+            )
         print(f"\n\n{working_count}/{total} proxies are working.")
     except KeyboardInterrupt:
         interrupted = True
