@@ -94,3 +94,18 @@ def check_proxy(protocol, proxy, timeout=5):
     except (requests.RequestException, ValueError):
         pass
     return {"protocol": protocol, "proxy": proxy, "ok": False}
+
+
+def summarize_by_country(results):
+    """
+    Group proxy results by country. Returns a list of
+    {"country", "count", "fastest_ms"} dicts, sorted ascending by
+    fastest_ms (each country's single fastest proxy).
+    """
+    by_country = {}
+    for r in results:
+        entry = by_country.setdefault(r["country"], {"country": r["country"], "count": 0, "fastest_ms": None})
+        entry["count"] += 1
+        if entry["fastest_ms"] is None or r["latency_ms"] < entry["fastest_ms"]:
+            entry["fastest_ms"] = r["latency_ms"]
+    return sorted(by_country.values(), key=lambda e: e["fastest_ms"])
