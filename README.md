@@ -1,113 +1,57 @@
-# proxylister
+# Proxy Tools
 
-A simple Python CLI tool that fetches free proxies from [ProxyScrape](https://proxyscrape.com/free-proxy-list), checks which ones are alive, geolocates each working proxy's exit IP, and optionally verifies each fast proxy by loading a real page through it with Selenium — right as that proxy is found valid.
+Two small CLI tools for working with free proxies from [ProxyScrape](https://proxyscrape.com/free-proxy-list), sharing a common library:
 
-## Features
-
-- Fetches proxies for all protocols — `http`, `socks4`, `socks5` — via ProxyScrape's public API, deduplicated across protocol lists so the same `ip:port` is never checked (or saved) twice
-- Checks proxy availability concurrently using a thread pool
-- Geolocates each working proxy's exit IP (country + GPS coordinates) via [ip-api.com](http://ip-api.com)
-- Outputs only working proxies, sorted by latency, filtered to only proxies faster than a given threshold, with a ready-to-use browser connection string and a Google Maps link
-- Optional Selenium validation (`--check-url`): the moment a proxy passes the latency filter, opens a real page through it in a Chrome browser, confirming it actually renders content (not just that it responds to a bare HTTP request) before it's kept in the output
+- **`proxylister.py`** — one-shot scan: fetch, check, geolocate, and save working proxies to a file. Optional Selenium validation against a real URL.
+- **`proxymonitor.py`** — live dashboard: continuously re-scans and shows currently-working proxies in a color-coded terminal table. No file output.
+- **`proxylib.py`** — shared fetching/checking logic used by both. Not run directly.
 
 ## Requirements
 
 - Python 3.9+
-- `requests`
-- `requests[socks]` (PySocks) — required to check `socks4`/`socks5` proxies
-- `selenium>=4.10` — only needed if you use `--check-url`
-- Google Chrome installed — only needed if you use `--check-url`. Selenium 4.10+ includes Selenium Manager, which automatically downloads a matching ChromeDriver, so no separate driver install or PATH setup is needed.
+- `requests`, `requests[socks]` (PySocks, for `socks4`/`socks5` proxies)
+- `selenium>=4.10` and Google Chrome — only needed for `proxylister.py --check-url`. Selenium Manager (bundled since 4.6) auto-downloads a matching ChromeDriver, so no manual driver setup is needed.
+- `proxymonitor.py` uses the standard-library `curses` module. On Windows, install `windows-curses` first (`curses` isn't available there by default).
 
 ## Installation
 
 ```bash
-cd proxylister
-
-# Create and activate a virtual environment
 python -m venv venv
 source venv/bin/activate  # on Windows: venv\Scripts\activate
 
-# Install dependencies
 pip install requests requests[socks]
+pip install "selenium>=4.10"   # only if you'll use --check-url
 ```
 
-### Selenium setup (only needed for `--check-url`)
+Keep `proxylib.py`, `proxylister.py`, and `proxymonitor.py` together in the same directory — the other two import from `proxylib.py`.
 
-```bash
-pip install "selenium>=4.10"
-```
+## proxylister.py
 
-You also need **Google Chrome** installed on the machine running the script — Selenium drives the actual Chrome browser, it doesn't bundle one.
-
-- **Linux**: install `google-chrome-stable` from Google's apt/yum repo, or your distro's Chromium package.
-- **macOS**: `brew install --cask google-chrome`, or download from [google.com/chrome](https://www.google.com/chrome/).
-- **Windows**: download and install from [google.com/chrome](https://www.google.com/chrome/).
-
-No manual ChromeDriver download or `PATH` setup is required — Selenium Manager (bundled since Selenium 4.6) detects your installed Chrome version and downloads a matching driver automatically the first time `--check-url` runs.
-
-If you're running on a headless server with no display, pair `--check-url` with `--headless` (see Options below) so Chrome doesn't need a windowing system.
-
-## Usage
-
-```bash
-python proxylister.py [options]
-```
-
-### Example
+Fetches proxies for all protocols (`http`, `socks4`, `socks5`), dedupes them, checks which are alive concurrently, geolocates each, and writes the ones under `--max-latency` to a file, sorted fastest first.
 
 ```bash
 python proxylister.py --timeout 5 --workers 50 --output working.txt --max-latency 500
 ```
-
-This fetches http, socks4, and socks5 proxies, tests each with a 5-second timeout using 50 concurrent workers, and saves only proxies faster than 500ms to `working.txt`. `--max-latency` defaults to `500` even if omitted; pass a different value to change the threshold.
-
-```bash
-python proxylister.py --max-latency 500 --check-url https://example.com
-```
-
-Same as above, but as soon as a proxy is found valid (latency under 500ms), it's immediately opened in a visible Chrome window through that proxy — any proxy whose page fails to load is dropped, and Selenium checks every valid proxy found, one at a time.
-
-```bash
-python proxylister.py --max-latency 500 --check-url https://example.com --headless
-```
-
-Same again, but Selenium runs headlessly instead of showing a visible window — use this on a server with no display.
 
 ### Options
 
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--timeout` | Seconds to wait per proxy check | `5` |
-| `--workers` | Number of concurrent worker threads | `50` |
-| `--output` | File to save working proxies to | `working_proxies.txt` |
-| `--max-latency` | Only keep proxies with latency lower than this (ms). Also determines the Selenium page-load timeout (`2x` this value in seconds, floored at 10s). | `500` |
-| `--check-url` | URL to open via Selenium through each proxy the moment it's found valid, as an extra validation layer | none (layer disabled) |
-| `--headless` | Run `--check-url` browser checks headlessly instead of in a visible window | off (visible window) |
+| `--workers` | Concurrent worker threads | `50` |
+| `--output` | Output file path | `working_proxies.txt` |
+| `--max-latency` | Only keep proxies faster than this (ms) | `500` |
+| `--check-url` | URL to validate each fast proxy against via Selenium (see below) | disabled |
+| `--headless` | Run `--check-url` checks without a visible browser window | off |
 
-## CLI Output
+Press **Ctrl+C** any time to stop early — only proxies already confirmed working (and Selenium-verified, if applicable) at that point get saved.
 
-While proxies are being checked, the CLI shows a single live progress bar (no per-proxy lines):
+### Output format
 
-```
-[########################----------------] 60% (300/500, 42 working, 11 valid)
-```
-
-If `--check-url` is set, a `selenium verified` count is added too:
+One proxy per line:
 
 ```
-[########################----------------] 60% (300/500, 42 working, 11 valid, 3 selenium verified)
-```
-
-It updates in place as each check completes, then prints a final summary and the output file path.
-
-Press **Ctrl+C** at any time to stop early — including mid-Selenium-check if `--check-url` is running. In-progress checks are dropped, and only the proxies already confirmed working (and, if applicable, already Selenium-verified) at that point are written to the output file — nothing partial or unverified gets saved.
-
-## File Output Format
-
-Confirmed-working results are written to the output file once the script stops, sorted by latency from low to high, one proxy per line. Only proxies with lower latency than `--max-latency` (default `500`ms) are included:
-
-```
-<latency> protocol server:port <connection string> <country> <lat,lon> <google maps link>
+<latency>ms <protocol> <ip:port> <connection string> <country> <lat,lon> <google maps link>
 ```
 
 Example:
@@ -116,54 +60,35 @@ Example:
 842ms socks5 62.133.62.207:1081 socks5://62.133.62.207:1081 Germany 51.2993,9.491 https://www.google.com/maps?q=51.2993,9.491
 ```
 
-- **latency** — round-trip time of the check request (`response.elapsed`), i.e. pure network time: proxy connect + handshake + forward + reply, with no local JSON-parsing or scheduling overhead included
-- **connection string** — ready to paste into a browser's or OS's proxy settings
-- **country / lat,lon** — geolocation of the proxy's exit IP
-- **google maps link** — opens that location directly on Google Maps
+### `--check-url` (Selenium validation)
 
-Dead or unreachable proxies are silently skipped — only working ones appear in the output.
+The moment a proxy passes the latency filter, it's opened in Chrome through that proxy — no separate pass, this happens inline during the scan. A proxy is dropped if the page fails to load, if Chrome shows its own internal network-error page, or if the response itself is an HTTP error (e.g. a dead proxy returning its own `502`/`403` page instead of forwarding to the target). On success the window stays open 10 seconds (skipped in `--headless` mode) so you can visually confirm the page actually rendered, then moves to the next proxy. The Selenium page-load timeout is `2 × --max-latency` in seconds, floored at 10s.
 
-## Selenium URL Validation (`--check-url`)
+## proxymonitor.py
 
-When `--check-url <URL>` is set, Selenium validation happens **inline**, per proxy, the instant that proxy passes the latency filter during the network scan — not as a separate pass afterward:
+Runs forever: each cycle re-fetches a fresh proxy list, checks it, and updates a live curses table of every currently-valid proxy (latency, protocol, country, last-checked time, connection string), color-coded green/yellow/red by how close it is to `--max-latency`. Nothing is written to disk.
 
-1. As soon as a proxy's latency comes in under `--max-latency`, Chrome is launched configured to route traffic through that one proxy (`--proxy-server=<protocol>://ip:port` — works for `http`, `socks4`, and `socks5` alike).
-2. Navigates to `--check-url` and waits for it to finish loading, up to a timeout of `2 × --max-latency` (in seconds), floored at 10 seconds — e.g. the default `--max-latency 500` would compute to 1 second, which is floored up to 10s instead. The floor exists because `--max-latency` measures a tiny JSON API round trip, not a full browser page load (Chrome startup, proxy tunnel, DNS, TLS handshake, rendering) — using the raw 2x value at low `--max-latency` settings produces a timeout too short for ChromeDriver's own timeout accounting to function correctly, let alone for any real page to load. At higher `--max-latency` values (e.g. 5000ms+), the 2x multiplier takes over from the floor.
-3. **On success**: holds the browser window open for 10 seconds (so you can visually confirm the page actually rendered — useful for catching proxies that pass a bare connectivity check but serve broken pages, interstitials, or CAPTCHAs), then closes it and the network scan continues to the next proxy. In `--headless` mode this 10-second hold is skipped entirely, since there's no window to look at.
-4. **On failure**: closes the browser immediately with no wait, and the proxy is dropped — it will not appear in the output file. "Failure" covers three cases: a Selenium/timeout exception, Chrome silently rendering its own internal network-error page (connection refused, proxy tunnel failure, DNS failure, etc. — this doesn't raise an exception on its own, so the script explicitly checks for it), and the main document response itself being an HTTP error (many broken/free proxies respond with their own valid-looking `502`/`403`/`504`/etc. page instead of forwarding to the target — the script reads Chrome's network log to catch this too, since it also looks like a normal successful page load otherwise).
-
-Because this runs inline, the network scan (still concurrent across all proxies) and Selenium checks (one browser at a time, sequential) overlap — Selenium starts working through valid proxies as they're discovered rather than waiting for the entire scan to finish first. Every valid proxy gets checked; there's no early-stop count.
-
-The progress bar's `selenium verified` count increases each time a proxy passes this check, so you can watch progress alongside the main scan without per-proxy console noise.
-
-If Ctrl+C is pressed — whether during the network scan or in the middle of a Selenium check — the script stops immediately: any open browser is closed first, then the run ends. Only proxies already verified before the interrupt are saved.
-
-## How It Works
-
-1. Fetches raw proxy lists (one per protocol) from ProxyScrape's API, extracts `ip:port` pairs, and deduplicates across protocols (the same `ip:port` can appear under more than one protocol's list).
-2. For each proxy, concurrently makes a single request through it to `ip-api.com`, which both confirms the proxy is alive, returns the geolocation of its exit IP, and times the round trip to record as network latency.
-3. The instant a proxy's latency comes in under `--max-latency`, if `--check-url` is set, that one proxy is immediately validated with Selenium (see below) before the scan moves on — checks aren't batched into a separate phase.
-4. Updates a live progress bar in the CLI as checks (and any inline Selenium checks) complete.
-5. Once the scan finishes (or is interrupted), sorts confirmed-working results by latency, filters out anything at or above `--max-latency`, and writes that list to the output file.
-6. If `--check-url` was set, also writes a second pass to the same output file containing only the proxies that passed the Selenium check.
-
-## Project Structure
-
+```bash
+python proxymonitor.py --timeout 5 --workers 50 --max-latency 500
 ```
-proxylister/
-├── proxylister.py   # Main script
-└── README.md
-```
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--timeout` | Seconds to wait per proxy check | `5` |
+| `--workers` | Concurrent worker threads | `50` |
+| `--max-latency` | Only track proxies faster than this (ms) | `500` |
+
+**Controls:** `q` quits, `p` pauses/resumes the display (checks keep running in the background while paused).
+
+The table is capped to whatever fits the terminal window at startup (resizing afterward has no effect); if more proxies qualify than fit, the slowest ones are dropped first. A proxy that stops passing on a re-check is removed immediately.
 
 ## Notes
 
-- Free proxies are often short-lived and unreliable, so expect a low success rate.
-- `ip-api.com`'s free tier is HTTP only and rate-limited to 45 requests/minute per source IP — since each lookup goes out through a different proxy IP, this limit rarely comes into play.
-- Increase `--timeout` if you're on a slow connection, or `--workers` for faster checking (at the cost of more open connections).
-- `--max-latency` defaults to `500`ms; pass a different value to widen or narrow what counts as "fast" for your use case.
-- `--check-url` is slow by nature (one browser, one proxy, ~10+ seconds each) and runs inline as valid proxies are found — the more proxies pass your `--max-latency` threshold, the longer the total run takes, since every one of them gets a Selenium check.
-- The Selenium page-load timeout isn't separately configurable; it's `2 × --max-latency` in seconds, floored at 10s. Widening `--max-latency` past 5000ms starts giving Selenium more time per page load than the floor already provides.
-- On a headless server (no display), always pair `--check-url` with `--headless`, or Chrome will fail to launch.
+- Free proxies are short-lived and unreliable — expect a low success rate.
+- `ip-api.com`'s free tier is rate-limited to 45 requests/minute per source IP, but since each lookup goes out through a different proxy, this rarely matters.
+- Raise `--workers` for faster scans (more open connections), or `--timeout` on a slow connection.
+- `--check-url` is slow by nature (~10+ seconds per proxy, one browser at a time) — the more proxies pass `--max-latency`, the longer the run takes.
+- On a headless server, pair `--check-url` with `--headless`, or Chrome will fail to launch.
 
 ## License
 

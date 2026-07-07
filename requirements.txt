@@ -1,0 +1,5 @@
+requests
+requests[socks]
+
+# Only needed for proxylister.py --check-url (not used by proxymonitor.py)
+selenium>=4.10
