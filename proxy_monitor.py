@@ -2,11 +2,11 @@
 """
 Live-monitor free proxies from ProxyScrape (all protocols): repeatedly
 fetches a fresh proxy list, checks which are alive and under a latency
-threshold, and prints an accumulating live table (latency, protocol,
-country, connection string) that updates as proxies are found or drop out.
+threshold, and shows an accumulating live table (latency, protocol,
+country, connection string) in a curses interface, color-coded by latency.
 
 Standalone from proxylister.py — CLI-only, no file output. Runs forever
-until stopped with Ctrl+C.
+until stopped with 'q' or Ctrl+C. Press 'p' to pause/resume the display.
 
 Usage:
     python proxy_monitor.py [--timeout 5] [--workers 50] [--max-latency 500]
@@ -14,6 +14,7 @@ Usage:
 
 import argparse
 import concurrent.futures
+import curses
 import os
 import re
 import sys
@@ -103,27 +104,214 @@ def check_proxy(protocol, proxy, timeout=5):
     return {"protocol": protocol, "proxy": proxy, "ok": False}
 
 
-def clear_screen():
-    os.system("cls" if os.name == "nt" else "clear")
+# Lines render() prints before the first data row: the status line, the
+# controls line, a blank line, the column header, and the separator rule.
+FIXED_HEADER_LINES = 5
+
+# curses color pair numbers, initialized in run().
+COLOR_FAST = 1    # green:  latency < 50% of --max-latency
+COLOR_MEDIUM = 2  # yellow: latency < 80% of --max-latency
+COLOR_SLOW = 3    # red:    latency >= 80% of --max-latency (but still under it)
 
 
-def render_table(tracked, cycle, checked_this_cycle, total_this_cycle):
-    """Clear the screen and reprint the current accumulated table, sorted by latency."""
-    clear_screen()
+def latency_color(latency_ms, max_latency):
+    """Pick a color pair based on how close latency_ms is to the max_latency threshold."""
+    if latency_ms < max_latency * 0.5:
+        return curses.color_pair(COLOR_FAST)
+    if latency_ms < max_latency * 0.8:
+        return curses.color_pair(COLOR_MEDIUM)
+    return curses.color_pair(COLOR_SLOW)
+
+
+def max_visible_rows(stdscr):
+    """
+    How many proxy rows fit in the terminal without the table scrolling,
+    based on the terminal size at the moment the script starts. Computed
+    once — resizing the terminal afterward has no effect on this.
+    """
+    height, _ = stdscr.getmaxyx()
+    # -1 as a small safety margin so the last line isn't flush against the
+    # very bottom edge of the terminal.
+    return max(height - FIXED_HEADER_LINES - 1, 1)
+
+
+def enforce_capacity(tracked, limit):
+    """
+    If more proxies are tracked than fit in the terminal, permanently drop
+    the highest-latency ones (not just hide them) so the table never grows
+    past what the screen can show without scrolling. Mutates tracked
+    in-place. Returns True if anything was dropped.
+    """
+    if len(tracked) <= limit:
+        return False
+
+    keep_keys = {
+        r["proxy"] for r in sorted(tracked.values(), key=lambda r: r["latency_ms"])[:limit]
+    }
+    for key in list(tracked.keys()):
+        if key not in keep_keys:
+            del tracked[key]
+    return True
+
+
+def safe_addnstr(stdscr, y, x, text, width, attr=0):
+    """addnstr, but swallow curses.error from writing to the terminal's last cell."""
+    try:
+        stdscr.addnstr(y, x, text, width, attr)
+    except curses.error:
+        pass
+
+
+def render(stdscr, tracked, cycle, checked_this_cycle, total_this_cycle, max_rows, max_latency, paused):
+    """Drop overflow rows to fit the terminal (fixed at startup), then redraw the whole screen."""
+    enforce_capacity(tracked, max_rows)
     rows = sorted(tracked.values(), key=lambda r: r["latency_ms"])
 
-    print(
+    height, width = stdscr.getmaxyx()
+    stdscr.erase()
+
+    status = (
         f"proxy_monitor — cycle {cycle}, checked {checked_this_cycle}/{total_this_cycle} "
-        f"this cycle, {len(rows)} currently valid  (Ctrl+C to stop)\n"
+        f"this cycle, {len(rows)} currently valid"
     )
+    if paused:
+        status += "  [PAUSED]"
+        safe_addnstr(stdscr, 0, 0, status, width - 1, curses.A_BOLD | curses.A_REVERSE)
+    else:
+        safe_addnstr(stdscr, 0, 0, status, width - 1, curses.A_BOLD)
+
+    safe_addnstr(stdscr, 1, 0, "q: quit   p: pause/resume", width - 1, curses.A_DIM)
 
     header = f"{'LATENCY':>8}  {'PROTOCOL':<8}  {'COUNTRY':<20}  CONNECTION"
-    print(header)
-    print("-" * len(header))
-    for r in rows:
+    safe_addnstr(stdscr, 3, 0, header, width - 1, curses.A_UNDERLINE)
+
+    for i, r in enumerate(rows):
+        y = FIXED_HEADER_LINES + i
+        if y >= height:
+            break
         conn = connection_string(r["protocol"], r["proxy"])
-        print(f"{r['latency_ms']:>6}ms  {r['protocol']:<8}  {r['country'][:20]:<20}  {conn}")
-    sys.stdout.flush()
+        line = f"{r['latency_ms']:>6}ms  {r['protocol']:<8}  {r['country'][:20]:<20}  {conn}"
+        safe_addnstr(stdscr, y, 0, line, width - 1, latency_color(r["latency_ms"], max_latency))
+
+    stdscr.refresh()
+
+
+def poll_keys(stdscr):
+    """
+    Drain all pending keypresses (non-blocking). Returns (quit, toggle_pause)
+    — quit is True if 'q' was pressed, toggle_pause is True if 'p' was
+    pressed (possibly more than once; net effect is what matters to caller).
+    """
+    quit_requested = False
+    toggle_pause = False
+    while True:
+        ch = stdscr.getch()
+        if ch == -1:
+            break
+        if ch in (ord("q"), ord("Q")):
+            quit_requested = True
+        elif ch in (ord("p"), ord("P")):
+            toggle_pause = not toggle_pause
+    return quit_requested, toggle_pause
+
+
+def run(stdscr, args):
+    """Main curses loop: cycles of fetch -> concurrent check -> live table update, until quit."""
+    curses.curs_set(0)
+    stdscr.nodelay(True)
+    curses.start_color()
+    curses.use_default_colors()
+    curses.init_pair(COLOR_FAST, curses.COLOR_GREEN, -1)
+    curses.init_pair(COLOR_MEDIUM, curses.COLOR_YELLOW, -1)
+    curses.init_pair(COLOR_SLOW, curses.COLOR_RED, -1)
+
+    tracked = {}  # ip:port -> latest result dict, for every currently-valid proxy
+    cycle = 0
+    paused = False
+    max_rows = max_visible_rows(stdscr)
+
+    try:
+        while True:
+            quit_requested, toggled = poll_keys(stdscr)
+            if toggled:
+                paused = not paused
+                render(stdscr, tracked, cycle, 0, 0, max_rows, args.max_latency, paused)
+            if quit_requested:
+                break
+
+            cycle += 1
+            entries = fetch_all_proxies()
+            total_this_cycle = len(entries)
+            checked_this_cycle = 0
+
+            if not entries:
+                continue
+
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=args.workers)
+            pending = {
+                executor.submit(check_proxy, protocol, proxy, args.timeout)
+                for protocol, proxy in entries
+            }
+            quit_requested = False
+            try:
+                while pending:
+                    # timeout=0.1 guarantees we check for a keypress at
+                    # least every 100ms, regardless of how long individual
+                    # proxy checks take — as_completed() alone would only
+                    # poll keys once a future happens to finish, which could
+                    # lag several seconds during a slow tail end of a cycle.
+                    done, pending = concurrent.futures.wait(
+                        pending, timeout=0.1, return_when=concurrent.futures.FIRST_COMPLETED
+                    )
+
+                    key_quit, key_toggled = poll_keys(stdscr)
+                    if key_toggled:
+                        paused = not paused
+                    if key_quit:
+                        quit_requested = True
+                        break
+
+                    changed = False
+                    for future in done:
+                        result = future.result()
+                        checked_this_cycle += 1
+
+                        key = result["proxy"]
+                        is_valid = result["ok"] and result["latency_ms"] < args.max_latency
+
+                        if is_valid:
+                            if key not in tracked or tracked[key]["latency_ms"] != result["latency_ms"]:
+                                changed = True
+                            tracked[key] = result
+                        elif key in tracked:
+                            del tracked[key]
+                            changed = True
+
+                    if key_toggled or (changed and not paused):
+                        render(
+                            stdscr, tracked, cycle, checked_this_cycle, total_this_cycle,
+                            max_rows, args.max_latency, paused,
+                        )
+            finally:
+                # Don't block waiting on any still-running (stuck-in-socket)
+                # threads — if we're unwinding here it's because the user
+                # quit, and we exit the process outright rather than
+                # waiting on them (see main()).
+                executor.shutdown(wait=False, cancel_futures=True)
+
+            if quit_requested:
+                break
+
+            if not paused:
+                # Redraw once more at the end of the cycle so the header's
+                # "checked X/Y this cycle" reflects the fully completed
+                # cycle, even if the last few checks didn't change anything.
+                render(
+                    stdscr, tracked, cycle, checked_this_cycle, total_this_cycle,
+                    max_rows, args.max_latency, paused,
+                )
+    except KeyboardInterrupt:
+        pass
 
 
 def main():
@@ -140,63 +328,18 @@ def main():
     )
     args = parser.parse_args()
 
-    tracked = {}  # ip:port -> latest result dict, for every currently-valid proxy
-    cycle = 0
-
-    print("Starting proxy monitor — press Ctrl+C to stop.\n")
-
     try:
-        while True:
-            cycle += 1
-            entries = fetch_all_proxies()
-            total_this_cycle = len(entries)
-            checked_this_cycle = 0
-
-            if not entries:
-                continue
-
-            executor = concurrent.futures.ThreadPoolExecutor(max_workers=args.workers)
-            futures = [
-                executor.submit(check_proxy, protocol, proxy, args.timeout)
-                for protocol, proxy in entries
-            ]
-            try:
-                for future in concurrent.futures.as_completed(futures):
-                    result = future.result()
-                    checked_this_cycle += 1
-
-                    key = result["proxy"]
-                    is_valid = result["ok"] and result["latency_ms"] < args.max_latency
-                    changed = False
-
-                    if is_valid:
-                        if key not in tracked or tracked[key]["latency_ms"] != result["latency_ms"]:
-                            changed = True
-                        tracked[key] = result
-                    elif key in tracked:
-                        del tracked[key]
-                        changed = True
-
-                    if changed:
-                        render_table(tracked, cycle, checked_this_cycle, total_this_cycle)
-            finally:
-                # Don't block waiting on any still-running (stuck-in-socket)
-                # threads — if we're unwinding here it's because Ctrl+C was
-                # pressed, and the outer handler exits the process outright
-                # rather than waiting on them.
-                executor.shutdown(wait=False, cancel_futures=True)
-
-            # Redraw once more at the end of the cycle so the header's
-            # "checked X/Y this cycle" reflects the fully completed cycle,
-            # even if the last few checks didn't change the tracked set.
-            render_table(tracked, cycle, checked_this_cycle, total_this_cycle)
+        curses.wrapper(run, args)
     except KeyboardInterrupt:
-        print("\n\nStopped.")
-        # Some worker threads may still be blocked in a socket call; those
-        # are non-daemon and would otherwise hang normal interpreter exit
-        # waiting for them. Exit immediately instead — there's nothing to
-        # flush or save in this mode.
-        os._exit(0)
+        pass
+
+    # curses.wrapper has already restored the terminal by this point.
+    print("Stopped.")
+    # Some worker threads may still be blocked in a socket call; those are
+    # non-daemon and would otherwise hang normal interpreter exit waiting
+    # for them. Exit immediately instead — there's nothing to flush or save
+    # in this mode.
+    os._exit(0)
 
 
 if __name__ == "__main__":
