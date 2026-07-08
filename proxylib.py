@@ -113,3 +113,28 @@ def summarize_by_country(results):
         if entry["fastest_ms"] is None or r["latency_ms"] < entry["fastest_ms"]:
             entry["fastest_ms"] = r["latency_ms"]
     return sorted(by_country.values(), key=lambda e: e["fastest_ms"])
+
+
+# --------------------------------------------------------------------------- #
+# New helper – fetch the list of countries that ProxyScrape reports having
+# at least one public proxy.  This is a single HTTP request and is much faster
+# than checking every individual proxy.
+def fetch_available_countries(timeout=5):
+    """
+    Return a sorted list of country names that ProxyScrape reports having at least one proxy.
+    Uses the `getcountries` endpoint (no per‑proxy checks).
+    """
+    url = f"{API_URL}getcountries"
+    params = {
+        "ssl": "all",
+        "anonymity": "all",
+    }
+    try:
+        resp = requests.get(url, params=params, timeout=timeout)
+        resp.raise_for_status()
+        # The API returns a plain‑text list, one country per line
+        countries = [c.strip() for c in resp.text.splitlines() if c.strip()]
+        return sorted(set(countries))
+    except requests.RequestException as e:
+        print(f"Failed to fetch available countries: {e}", file=sys.stderr)
+        return []

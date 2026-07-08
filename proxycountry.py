@@ -11,7 +11,7 @@ import concurrent.futures
 import os
 import sys
 
-from proxylib import check_proxy, fetch_all_proxies, summarize_by_country
+from proxylib import check_proxy, fetch_all_proxies, summarize_by_country, fetch_available_countries
 
 
 def print_progress_bar(done, total, valid_count, bar_width=40):
@@ -75,8 +75,8 @@ def main():
         sys.exit(0)
 
     if args.list_countries:
-        # Quick country list mode
-        countries = get_countries(entries, timeout=args.timeout)
+        # Fast path – use the dedicated API call
+        countries = fetch_available_countries(timeout=args.timeout)
         for c in countries:
             print(c)
         return
