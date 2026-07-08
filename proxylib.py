@@ -5,6 +5,7 @@ Not meant to be run directly; see README.md for usage of the two scripts.
 
 import re
 import sys
+import concurrent.futures
 
 import requests
 
@@ -35,19 +36,22 @@ def fetch_proxy_list(protocol, timeout_ms=10000, country="all"):
 def fetch_all_proxies(verbose=False):
     """
     Fetch and dedupe proxies across all protocols. Returns a list of
-    (protocol, ip:port). verbose=False by default so this is safe to call
-    repeatedly from proxymonitor.py's curses loop.
+    (protocol, ip:port). Uses concurrent fetching to speed up the process.
     """
     entries = []
-    for protocol in PROTOCOLS:
-        try:
-            proxies = fetch_proxy_list(protocol)
-        except requests.RequestException as e:
-            print(f"Failed to fetch {protocol} proxy list: {e}", file=sys.stderr)
-            continue
-        if verbose:
-            print(f"  {protocol}: {len(proxies)} proxies")
-        entries.extend((protocol, p) for p in proxies)
+    # Use a thread pool to fetch each protocol concurrently
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(PROTOCOLS)) as executor:
+        future_to_protocol = {executor.submit(fetch_proxy_list, proto): proto for proto in PROTOCOLS}
+        for future in concurrent.futures.as_completed(future_to_protocol):
+            protocol = future_to_protocol[future]
+            try:
+                proxies = future.result()
+            except requests.RequestException as e:
+                print(f"Failed to fetch {protocol} proxy list: {e}", file=sys.stderr)
+                continue
+            if verbose:
+                print(f"  {protocol}: {len(proxies)} proxies")
+            entries.extend((protocol, p) for p in proxies)
 
     # The same ip:port can appear under more than one protocol's list.
     deduped = []
