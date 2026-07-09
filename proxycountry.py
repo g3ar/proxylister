@@ -65,10 +65,15 @@ def main():
         action="store_true",
         help="List all countries reported by the proxy list and exit",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print per-protocol counts when fetching proxies",
+    )
     args = parser.parse_args()
 
     print("Fetching proxy lists from ProxyScrape (http, socks4, socks5)...")
-    entries = fetch_all_proxies(verbose=True)
+    entries = fetch_all_proxies(verbose=args.verbose)
 
     if not entries:
         print("No proxies found.")
@@ -81,14 +86,14 @@ def main():
             print(c)
         return
 
-    print(f"Fetched {len(entries)} proxies total. Checking availability with {args.workers} workers...")
+    print(f"Fetched {len(entries)} proxies total. Checking availability with {min(args.workers, 50)} workers...")
     print("(Press Ctrl+C at any time to stop early — the breakdown will use whatever was found so far.)")
 
     valid = []
     total = len(entries)
     done = 0
     interrupted = False
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=args.workers)
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=min(args.workers, 50))
     try:
         futures = [
             executor.submit(check_proxy, protocol, proxy, args.timeout)
