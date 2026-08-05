@@ -91,9 +91,13 @@ class ProxyHistory:
             if self.state != "STABLE":
                 self.stable_since = now
             self.state = "STABLE"
-        elif self.state in {"STABLE", "DEGRADED"} or (not succeeded and self.latest is not None):
+        elif not succeeded and self.latest is not None:
             self.state = "DEGRADED"
         else:
+            # A successful check means the proxy recovered. It is probationary
+            # until the rolling rate/streak/time criteria qualify it as stable;
+            # DEGRADED must describe the latest health result, not stick forever
+            # after any historical failure.
             self.state = "PROBATION"
 
 

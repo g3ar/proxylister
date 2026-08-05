@@ -72,7 +72,7 @@ class CliHelperTests(unittest.TestCase):
         self.assertEqual(history.p95_latency, 110)
         self.assertEqual(history.jitter, 7)
 
-    def test_failure_degrades_and_resets_continuous_alive_time(self):
+    def test_failure_degrades_then_success_recovers_to_probation(self):
         config = StabilityConfig(min_checks=1, min_success_streak=1, min_alive_time=0)
         policy = StabilityPolicy(config)
         history = ProxyHistory("http", self.fast.proxy, config.history_size)
@@ -84,7 +84,8 @@ class CliHelperTests(unittest.TestCase):
         self.assertIsNone(history.alive_since)
         self.assertIsNone(history.stable_since)
         history.record(self.fast, 120, policy)
-        self.assertEqual(history.state, "DEGRADED")
+        self.assertEqual(history.state, "PROBATION")
+        self.assertEqual(history.consecutive_successes, 1)
 
     def test_failure_tolerance_preserves_alive_origin(self):
         config = StabilityConfig(
