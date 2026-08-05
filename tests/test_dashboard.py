@@ -41,6 +41,16 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.query_one(DataTable).row_count, 1)
             self.assertIn("Checking 4/10", str(app.query_one("#status", Static).content))
             self.assertIn("Blocked by: alive, checks", str(app.query_one("#details", Static).content))
+            await pilot.press("c")
+            await pilot.press(*"germany", "enter")
+            await pilot.pause()
+            self.assertEqual(app.query_one(DataTable).row_count, 0)
+            await pilot.press("c")
+            country_input = app.query_one("#country-filter")
+            country_input.value = "fran"
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertEqual(app.query_one(DataTable).row_count, 1)
 
 
 if __name__ == "__main__":

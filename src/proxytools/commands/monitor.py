@@ -7,7 +7,8 @@ uptime plus configurable count, rate, streak, latency, and jitter thresholds.
 Keyboard controls::
 
     q  quit                 p  pause display (checks continue)
-    s  toggle stable-only   r  force the next scan cycle
+    s  toggle stable-only   c  filter by country
+    r  force next cycle
 
 Examples::
 

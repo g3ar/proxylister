@@ -1,10 +1,9 @@
 # Proxy Tools
 
-`proxytools` is a single CLI application for working with free proxies from [ProxyScrape](https://proxyscrape.com/free-proxy-list). It provides three subcommands:
+`proxytools` is a single CLI application for working with free proxies from [ProxyScrape](https://proxyscrape.com/free-proxy-list). It provides two subcommands:
 
 - **`scan`** — one-shot fetch, check, geolocation, export, and optional browser validation.
 - **`monitor`** — continuous stability monitoring in a live terminal dashboard.
-- **`countries`** — country breakdown of valid proxies or a fast advertised-country list.
 
 ## Requirements
 
@@ -31,7 +30,6 @@ On the first real command, `./proxytools` creates an ignored `.venv` and install
 ```bash
 ./proxytools scan --help
 ./proxytools monitor --help
-./proxytools countries --help
 ```
 
 ## `scan`
@@ -101,20 +99,11 @@ Runs forever and keeps a rolling check history for each proxy. New candidates st
 | `--retention-time` | Continue tracking proxies absent from ProxyScrape for this many seconds | `1800` |
 | `--stable-only` | Hide probation and degraded proxies | off |
 
-**Controls:** arrow keys select and scroll rows, `q` quits, `p` pauses/resumes display updates (checks continue), `s` toggles stable-only mode, and `r` requests the next scan immediately. Textual's footer always shows the active bindings.
+**Controls:** arrow keys select and scroll rows, `q` quits, `p` pauses/resumes display updates (checks continue), `s` toggles stable-only mode, `c` opens a case-insensitive country filter, and `r` requests the next scan immediately. Submit an empty country filter to show every country again. Textual's footer always shows the active bindings.
 
 The Textual table is scrollable, supports row selection, and updates a detail panel for the highlighted proxy. It shows state, continuous live time, check count, success streak, rolling success rate, median latency, p95 latency, jitter, blocking criteria, and connection string. `Blocked by` explains why a row is not yet stable: `alive`, `checks`, `rate`, `streak`, `latency`, `jitter`, or `failed`. A status bar reports the current phase, cycle progress, tracked/stable counts, active filter, and countdown to the next cycle. A proxy that disappears from ProxyScrape continues to be checked until `--retention-time` expires.
 
 A successful check requires a duration below `--max-latency`. By default, any failed check resets continuous live time. Setting `--alive-failure-tolerance 1`, for example, preserves the original live-time counter through one isolated failure, although the proxy still becomes `DEGRADED` immediately.
-
-## `countries`
-
-Print a country summary, or fetch only ProxyScrape's advertised country list without downloading and checking every proxy:
-
-```bash
-./proxytools countries --timeout 5 --workers 50 --max-latency 500
-./proxytools countries --list-countries
-```
 
 ## Tests
 
@@ -134,7 +123,7 @@ proxytools                 root launcher and environment bootstrap
 pyproject.toml             package metadata and installed console script
 src/proxytools/
   cli.py                   top-level command dispatcher
-  commands/                scan, monitor, and countries orchestration
+  commands/                scan and monitor orchestration
   sources/                 ProxyScrape API adapter
   checking/                HTTP and optional browser validation
   monitoring.py            UI-independent engine and immutable snapshots

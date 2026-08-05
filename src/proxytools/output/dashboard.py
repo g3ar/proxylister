@@ -8,7 +8,7 @@ from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import DataTable, Footer, Header, Static
+from textual.widgets import DataTable, Footer, Header, Input, Static
 
 from proxytools.monitoring import MonitorEngine, MonitorRow, MonitorSnapshot
 
@@ -38,6 +38,11 @@ class ProxyMonitorApp(App):
     #table {
         height: 1fr;
     }
+    #country-filter {
+        display: none;
+        dock: top;
+        margin: 0 1;
+    }
     #details {
         height: 8;
         padding: 1 2;
@@ -52,7 +57,9 @@ class ProxyMonitorApp(App):
         Binding("q", "quit", "Quit"),
         Binding("p", "pause", "Pause"),
         Binding("s", "stable_only", "Stable only"),
+        Binding("c", "country_filter", "Country"),
         Binding("r", "refresh", "Refresh"),
+        Binding("escape", "cancel_filter", "Cancel filter", show=False),
     ]
 
     def __init__(self, engine: MonitorEngine, *, stable_only=False, autostart=True):
@@ -61,6 +68,7 @@ class ProxyMonitorApp(App):
         self.stable_only = stable_only
         self.autostart = autostart
         self.paused = False
+        self.country_filter = ""
         self.stop_event = threading.Event()
         self.latest_snapshot: MonitorSnapshot | None = None
         self.pending_snapshot: MonitorSnapshot | None = None
@@ -69,6 +77,7 @@ class ProxyMonitorApp(App):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield Static("Starting monitor…", id="status")
+        yield Input(placeholder="Country filter (empty = all countries)", id="country-filter")
         yield DataTable(id="table", cursor_type="row", zebra_stripes=True)
         yield Static("Select a proxy to see stability details.", id="details")
         yield Footer()
@@ -110,7 +119,7 @@ class ProxyMonitorApp(App):
                 pass
         table.clear()
         self.rows_by_key.clear()
-        rows = [row for row in snapshot.rows if not self.stable_only or row.state == "STABLE"]
+        rows = self.filtered_rows(snapshot)
         for row in rows:
             key = f"{row.key[0]}|{row.key[1]}"
             self.rows_by_key[key] = row
@@ -143,10 +152,12 @@ class ProxyMonitorApp(App):
             "checking": f"Checking {snapshot.checked}/{snapshot.total}",
             "waiting": f"Next cycle in {snapshot.next_cycle_in}s",
         }.get(snapshot.phase, snapshot.phase.title())
-        filters = "stable only" if self.stable_only else "all states"
+        filters = ["stable only" if self.stable_only else "all states"]
+        if self.country_filter:
+            filters.append(f"country contains '{self.country_filter}'")
         text = (
             f"Cycle {snapshot.cycle} │ {phase} │ {snapshot.stable_count} stable │ "
-            f"{snapshot.tracked_count} tracked │ {visible} visible │ {filters}"
+            f"{snapshot.tracked_count} tracked │ {visible} visible │ {', '.join(filters)}"
         )
         if self.paused:
             text += " │ PAUSED (checks continue)"
@@ -183,6 +194,27 @@ class ProxyMonitorApp(App):
         if self.latest_snapshot is not None:
             self.render_snapshot(self.latest_snapshot)
 
+    def action_country_filter(self):
+        country_input = self.query_one("#country-filter", Input)
+        country_input.value = self.country_filter
+        country_input.display = True
+        country_input.focus()
+
+    def action_cancel_filter(self):
+        country_input = self.query_one("#country-filter", Input)
+        if country_input.display:
+            country_input.display = False
+            self.query_one("#table", DataTable).focus()
+
+    def on_input_submitted(self, event: Input.Submitted):
+        if event.input.id != "country-filter":
+            return
+        self.country_filter = event.value.strip()
+        event.input.display = False
+        self.query_one("#table", DataTable).focus()
+        if self.latest_snapshot is not None:
+            self.render_snapshot(self.latest_snapshot)
+
     def action_refresh(self):
         self.engine.request_refresh()
         self.notify("Refresh requested")
@@ -203,3 +235,12 @@ class ProxyMonitorApp(App):
     @classmethod
     def _state_text(cls, state):
         return Text(state, style=cls._state_color(state))
+
+    def filtered_rows(self, snapshot: MonitorSnapshot):
+        country_filter = self.country_filter.casefold()
+        return [
+            row
+            for row in snapshot.rows
+            if (not self.stable_only or row.state == "STABLE")
+            and (not country_filter or country_filter in row.country.casefold())
+        ]

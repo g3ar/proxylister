@@ -7,7 +7,6 @@ from proxytools import __version__
 COMMANDS = {
     "scan": "proxytools.commands.scan",
     "monitor": "proxytools.commands.monitor",
-    "countries": "proxytools.commands.countries",
 }
 
 
@@ -20,7 +19,6 @@ def show_help(stream=None):
 Commands:
   scan       Find, check, and export working proxies
   monitor    Monitor proxies until they meet stability criteria
-  countries  Show a country summary or list available countries
   help       Show this help
 
 Run ./proxytools <command> --help for command-specific options.""",

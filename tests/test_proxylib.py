@@ -5,7 +5,6 @@ from unittest.mock import patch
 import requests
 
 from proxytools import config
-from proxytools.analytics import summarize_by_country
 from proxytools.checking import proxy as checker
 from proxytools.models import ProxyResult
 from proxytools.sources import proxyscrape
@@ -39,15 +38,6 @@ class ProxyLibraryTests(unittest.TestCase):
                 proxyscrape.fetch_all_proxies(),
                 [("http", "1.2.3.4:80"), ("socks4", "1.2.3.4:80")],
             )
-
-    def test_country_summary_is_sorted_by_fastest(self):
-        results = [
-            ProxyResult("http", "a:1", True, 80, "B"),
-            ProxyResult("http", "b:2", True, 40, "A"),
-            ProxyResult("http", "c:3", True, 60, "A"),
-        ]
-        summary = summarize_by_country(results)
-        self.assertEqual([(item.country, item.count, item.fastest_ms) for item in summary], [("A", 2, 40), ("B", 1, 80)])
 
     def test_check_proxy_uses_median_complete_duration(self):
         response = FakeResponse(payload={"status": "success", "country": "A", "lat": 1, "lon": 2})

@@ -49,17 +49,3 @@ def fetch_all_proxies(verbose: bool = False) -> list[tuple[str, str]]:
         if len(entries) != len(deduped):
             print(f"  Filtered {len(entries) - len(deduped)} duplicate protocol/address entries")
     return deduped
-
-
-def fetch_available_countries(timeout: float = 5) -> list[str]:
-    try:
-        response = session().get(
-            f"{API_URL}getcountries",
-            params={"ssl": "all", "anonymity": "all"},
-            timeout=timeout,
-        )
-        response.raise_for_status()
-        return sorted({country.strip() for country in response.text.splitlines() if country.strip()})
-    except requests.RequestException as exc:
-        print(f"Failed to fetch available countries: {exc}", file=sys.stderr)
-        return []

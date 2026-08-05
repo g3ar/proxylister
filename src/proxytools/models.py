@@ -22,10 +22,3 @@ class ProxyResult:
 
     def to_dict(self) -> dict:
         return asdict(self)
-
-
-@dataclass(slots=True)
-class CountrySummary:
-    country: str
-    count: int
-    fastest_ms: int

@@ -4,7 +4,7 @@ import unittest
 
 from proxytools import __version__
 from proxytools import cli
-from proxytools.commands import countries, monitor, scan
+from proxytools.commands import monitor, scan
 
 
 class TopLevelCliTests(unittest.TestCase):
@@ -12,7 +12,7 @@ class TopLevelCliTests(unittest.TestCase):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             self.assertEqual(cli.main([]), 0)
-        for command in ("scan", "monitor", "countries"):
+        for command in ("scan", "monitor"):
             self.assertIn(command, output.getvalue())
 
     def test_unknown_command_returns_usage_error(self):
@@ -30,7 +30,6 @@ class TopLevelCliTests(unittest.TestCase):
     def test_subcommand_program_names(self):
         self.assertEqual(scan.build_parser().prog, "proxytools scan")
         self.assertEqual(monitor.build_parser().prog, "proxytools monitor")
-        self.assertEqual(countries.build_parser().prog, "proxytools countries")
 
 
 if __name__ == "__main__":

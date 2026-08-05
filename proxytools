@@ -14,7 +14,6 @@ show_help() {
         'Commands:' \
         '  scan       Find, check, and export working proxies' \
         '  monitor    Monitor proxies until they meet stability criteria' \
-        '  countries  Show a country summary or list available countries' \
         '  help       Show this help' \
         '' \
         'Run ./proxytools <command> --help for command-specific options.' \
@@ -39,8 +38,6 @@ case "$COMMAND" in
     scan)
         ;;
     monitor)
-        ;;
-    countries)
         ;;
     *)
         printf 'proxytools: unknown command: %s\n\n' "$COMMAND" >&2
