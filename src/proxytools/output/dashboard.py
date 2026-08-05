@@ -12,6 +12,7 @@ from textual.binding import Binding
 from textual.widgets import DataTable, Footer, Header, Input, Static
 
 from proxytools.monitoring import MonitorEngine, MonitorRow, MonitorSnapshot
+from proxytools.browser import BrowserUnavailable, launch_browser_session
 
 
 def format_duration(seconds: float) -> str:
@@ -60,6 +61,7 @@ class ProxyMonitorApp(App):
         Binding("s", "stable_only", "Stable only"),
         Binding("c", "country_filter", "Country"),
         Binding("r", "refresh", "Refresh"),
+        Binding("b", "browser", "Browser"),
         Binding("escape", "cancel_filter", "Cancel filter", show=False),
     ]
     COLUMNS = (
@@ -76,7 +78,10 @@ class ProxyMonitorApp(App):
         ("Connection", "connection"),
     )
 
-    def __init__(self, engine: MonitorEngine, *, stable_only=False, autostart=True):
+    def __init__(
+        self, engine: MonitorEngine, *, stable_only=False, autostart=True,
+        browser="auto", browser_url="about:blank",
+    ):
         super().__init__()
         self.engine = engine
         self.stable_only = stable_only
@@ -89,6 +94,9 @@ class ProxyMonitorApp(App):
         self.rows_by_key: dict[str, MonitorRow] = {}
         self.cells_by_key: dict[str, tuple] = {}
         self.completed_cycle = 0
+        self.browser = browser
+        self.browser_url = browser_url
+        self.browser_process = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -247,6 +255,50 @@ class ProxyMonitorApp(App):
     def action_refresh(self):
         self.engine.request_refresh()
         self.notify("Refresh requested")
+
+    def action_browser(self):
+        if self.browser_process is not None and self.browser_process.poll() is None:
+            self.notify("A browser session is already running", severity="warning")
+            return
+        table = self.query_one("#table", DataTable)
+        if not table.row_count:
+            self.notify("No proxy selected", severity="warning")
+            return
+        key = str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
+        row = self.rows_by_key.get(key)
+        if row is None:
+            self.notify("No proxy selected", severity="warning")
+            return
+        try:
+            family, self.browser_process = launch_browser_session(
+                self.browser, row.key[0], row.key[1], self.browser_url
+            )
+        except BrowserUnavailable as error:
+            self.notify(str(error), severity="error", timeout=8)
+            return
+        self.notify(f"Opening {family} through {row.connection}")
+        threading.Thread(
+            target=self.browser_watcher,
+            args=(self.browser_process,),
+            name="proxytools-browser-watcher",
+            daemon=True,
+        ).start()
+
+    def browser_watcher(self, process):
+        return_code = process.wait()
+        try:
+            self.call_from_thread(self.browser_finished, process, return_code)
+        except RuntimeError:
+            # The detached helper owns cleanup if the monitor has already quit.
+            pass
+
+    def browser_finished(self, process, return_code):
+        if self.browser_process is process:
+            self.browser_process = None
+        if return_code:
+            self.notify("Browser session ended with an error", severity="error")
+        else:
+            self.notify("Browser session closed")
 
     def action_quit(self):
         self.stop_event.set()

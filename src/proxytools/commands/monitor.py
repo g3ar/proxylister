@@ -8,7 +8,7 @@ Keyboard controls::
 
     q  quit                 p  pause display (checks continue)
     s  toggle stable-only   c  filter by country
-    r  force next cycle
+    r  force next cycle     b  open selected proxy in a private browser
 
 Examples::
 
@@ -55,6 +55,15 @@ def build_parser(prog="proxytools monitor"):
 
     display = parser.add_argument_group("display")
     display.add_argument("--stable-only", action="store_true", help="Initially show only stable proxies")
+    browser = parser.add_argument_group("browser")
+    browser.add_argument(
+        "--browser", choices=("auto", "chrome", "firefox"), default="auto",
+        help="Browser used by the 'b' action (default: auto)",
+    )
+    browser.add_argument(
+        "--browser-url", default="about:blank",
+        help="Initial URL for disposable browser sessions",
+    )
     persistence = parser.add_argument_group("persistence")
     persistence.add_argument(
         "--reset-history", action="store_true",
@@ -105,7 +114,12 @@ def main(argv=None):
     try:
         if args.reset_history:
             repository.reset()
-        ProxyMonitorApp(engine_from_args(args, repository), stable_only=args.stable_only).run()
+        ProxyMonitorApp(
+            engine_from_args(args, repository),
+            stable_only=args.stable_only,
+            browser=args.browser,
+            browser_url=args.browser_url,
+        ).run()
     finally:
         repository.close()
     return 0
