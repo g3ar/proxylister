@@ -29,7 +29,9 @@ from proxytools.config import (
 )
 from proxytools.monitoring import MonitorEngine
 from proxytools.output.dashboard import ProxyMonitorApp
+from proxytools.paths import database_path
 from proxytools.stability import StabilityConfig, StabilityPolicy
+from proxytools.storage import StateRepository
 
 
 def build_parser(prog="proxytools monitor"):
@@ -53,6 +55,11 @@ def build_parser(prog="proxytools monitor"):
 
     display = parser.add_argument_group("display")
     display.add_argument("--stable-only", action="store_true", help="Initially show only stable proxies")
+    persistence = parser.add_argument_group("persistence")
+    persistence.add_argument(
+        "--reset-history", action="store_true",
+        help="Delete this clone's saved proxy history before monitoring",
+    )
     return parser
 
 
@@ -78,7 +85,7 @@ def policy_from_args(args):
     )
 
 
-def engine_from_args(args):
+def engine_from_args(args, repository=None):
     return MonitorEngine(
         policy=policy_from_args(args),
         workers=args.workers,
@@ -86,6 +93,7 @@ def engine_from_args(args):
         samples=args.samples,
         refresh_interval=args.refresh_interval,
         retention_time=args.retention_time,
+        repository=repository,
     )
 
 
@@ -93,5 +101,11 @@ def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
     validate_args(parser, args)
-    ProxyMonitorApp(engine_from_args(args), stable_only=args.stable_only).run()
+    repository = StateRepository(database_path())
+    try:
+        if args.reset_history:
+            repository.reset()
+        ProxyMonitorApp(engine_from_args(args, repository), stable_only=args.stable_only).run()
+    finally:
+        repository.close()
     return 0

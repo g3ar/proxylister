@@ -12,6 +12,7 @@ from proxytools.checking import check_proxy, connection_string
 from proxytools.sources.proxyscrape import fetch_all_proxies
 from proxytools.stability import StabilityPolicy
 from proxytools.stability.history import expire_histories, update_advertised
+from proxytools.storage import CheckObservation
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +30,9 @@ class MonitorRow:
     country: str
     blockers: tuple[str, ...]
     connection: str
+    first_seen_at: float | None = None
+    total_observed_uptime: float = 0
+    last_failure_at: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +61,7 @@ class MonitorEngine:
         retention_time: float,
         fetcher=fetch_all_proxies,
         checker=check_proxy,
+        repository=None,
     ):
         self.policy = policy
         self.workers = workers
@@ -66,7 +71,13 @@ class MonitorEngine:
         self.retention_time = retention_time
         self.fetcher = fetcher
         self.checker = checker
-        self.histories = {}
+        self.repository = repository
+        self.continuity_tolerance = 2 * refresh_interval
+        self.histories = (
+            repository.load_histories(policy, retention_time, self.continuity_tolerance)
+            if repository is not None else {}
+        )
+        self._pending_observations = []
         self.cycle = 0
         self._refresh_requested = threading.Event()
 
@@ -94,6 +105,9 @@ class MonitorEngine:
                     country=history.latest.country,
                     blockers=tuple(self.policy.blockers(history, now)),
                     connection=connection_string(history.protocol, history.proxy),
+                    first_seen_at=history.first_seen_at,
+                    total_observed_uptime=history.total_observed_uptime,
+                    last_failure_at=history.last_failure_at,
                 )
             )
         state_order = {"STABLE": 0, "PROBATION": 1, "DEGRADED": 2}
@@ -147,13 +161,36 @@ class MonitorEngine:
                         checked += 1
                         history = self.histories.get(result.key)
                         if history is not None:
-                            history.record(result, time.monotonic(), self.policy)
+                            checked_mono = time.monotonic()
+                            checked_wall = time.time()
+                            old_state = history.state
+                            previous = history.samples[-1] if history.samples else None
+                            history.record(result, checked_mono, self.policy)
+                            accepted = history.samples[-1].ok
+                            if history.first_seen_at is None:
+                                history.first_seen_at = checked_wall
+                            if accepted and previous is not None and previous.ok:
+                                gap = checked_mono - previous.checked_at
+                                if 0 <= gap <= self.continuity_tolerance:
+                                    history.total_observed_uptime += gap
+                            if not accepted:
+                                history.last_failure_at = checked_wall
+                            if self.repository is not None:
+                                reason = ", ".join(self.policy.blockers(history, checked_mono))
+                                self._pending_observations.append(
+                                    CheckObservation(result, checked_wall, accepted, old_state, history.state, reason)
+                                )
+                                if len(self._pending_observations) >= 100:
+                                    self._flush()
                     publish_now = time.monotonic()
                     if done and (checked == len(candidates) or publish_now - last_publish_at >= 0.2):
                         publish(self.snapshot(checked, len(candidates), "checking"))
                         last_publish_at = publish_now
             finally:
                 executor.shutdown(wait=False, cancel_futures=True)
+            self._flush()
+            if self.repository is not None and self.cycle % 10 == 0:
+                self.repository.prune_checks(time.time() - 86400)
             if stop.is_set():
                 break
 
@@ -168,3 +205,7 @@ class MonitorEngine:
                 if remaining <= 0:
                     break
                 stop.wait(min(0.2, remaining))
+    def _flush(self):
+        if self.repository is not None and self._pending_observations:
+            pending, self._pending_observations = self._pending_observations, []
+            self.repository.save_checks(pending, self.continuity_tolerance)

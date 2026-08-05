@@ -31,6 +31,9 @@ class ProxyHistory:
     stable_since: float | None = None
     last_advertised_at: float = 0
     state: str = "PROBATION"
+    first_seen_at: float | None = None
+    total_observed_uptime: float = 0
+    last_failure_at: float | None = None
 
     def __post_init__(self):
         self.samples = deque(maxlen=self.history_size)

@@ -76,7 +76,9 @@ Fast proxies first receive a lightweight HTTP check against the target URL. Thos
 
 ## `monitor`
 
-Runs forever and keeps a rolling check history for each proxy. New candidates start in `PROBATION`, become `STABLE` only after satisfying every configured time and quality threshold, and change to `DEGRADED` after a failure. Green, yellow, and red rows represent those states. Nothing is written to disk.
+Runs forever and keeps a rolling check history for each proxy. New candidates start in `PROBATION`, become `STABLE` only after satisfying every configured time and quality threshold, and change to `DEGRADED` after a failure. Green, yellow, and red rows represent those states.
+
+Monitor state is stored in `proxytools.db` beside the root launcher. Each clone therefore has an independent database. Recent checks restore the rolling history after a restart, but a pause longer than twice `--refresh-interval` is not counted as continuous uptime. Detailed checks are retained for 24 hours; lifetime counters and state transitions remain in the database. SQLite WAL companion files are expected while the monitor is running. All database and lock files are ignored by Git.
 
 ```bash
 ./proxytools monitor --timeout 5 --workers 50 --max-latency 500 --min-alive-time 60
@@ -98,10 +100,13 @@ Runs forever and keeps a rolling check history for each proxy. New candidates st
 | `--alive-failure-tolerance` | Failures allowed before continuous live time resets | `0` |
 | `--retention-time` | Continue tracking proxies absent from ProxyScrape for this many seconds | `1800` |
 | `--stable-only` | Hide probation and degraded proxies | off |
+| `--reset-history` | Delete this clone's saved history before starting | off |
 
 **Controls:** arrow keys select and scroll rows, `q` quits, `p` pauses/resumes display updates (checks continue), `s` toggles stable-only mode, `c` opens a case-insensitive country filter, and `r` requests the next scan immediately. Submit an empty country filter to show every country again. Textual's footer always shows the active bindings.
 
-The Textual table is scrollable, supports row selection, and updates a detail panel for the highlighted proxy. It shows state, continuous live time, check count, success streak, rolling success rate, median latency, p95 latency, jitter, blocking criteria, and connection string. `Blocked by` explains why a row is not yet stable: `alive`, `checks`, `rate`, `streak`, `latency`, `jitter`, or `failed`. A status bar reports the current phase, cycle progress, tracked/stable counts, active filter, and countdown to the next cycle. A proxy that disappears from ProxyScrape continues to be checked until `--retention-time` expires.
+The Textual table is scrollable, supports row selection, and updates a detail panel for the highlighted proxy. It shows state, continuous live time, total observed uptime, first seen and last failure times, check count, success streak, rolling success rate, median latency, p95 latency, jitter, blocking criteria, and connection string. `Blocked by` explains why a row is not yet stable: `alive`, `checks`, `rate`, `streak`, `latency`, `jitter`, or `failed`. A status bar reports the current phase, cycle progress, tracked/stable counts, active filter, and countdown to the next cycle. A proxy that disappears from ProxyScrape continues to be checked until `--retention-time` expires.
+
+Only one working command (`scan` or `monitor`) may run from a given clone at a time. The kernel-backed `proxytools.lock` is released automatically even after a crash. Separate clones use separate locks and databases and can run simultaneously. Help and version commands never acquire the lock.
 
 A successful check requires a duration below `--max-latency`. By default, any failed check resets continuous live time. Setting `--alive-failure-tolerance 1`, for example, preserves the original live-time counter through one isolated failure, although the proxy still becomes `DEGRADED` immediately.
 
@@ -128,7 +133,10 @@ src/proxytools/
   checking/                HTTP and optional browser validation
   monitoring.py            UI-independent engine and immutable snapshots
   stability/               rolling history and stability policy
+  storage/                 SQLite schema, restoration, and batched persistence
   output/                  Rich console output, serializers, and Textual dashboard
+  process_lock.py          per-clone kernel process lock
+  paths.py                 clone-local runtime path resolution
   models.py                shared domain records
   config.py                shared CLI value validation
 tests/                     isolated unit tests with mocked network access

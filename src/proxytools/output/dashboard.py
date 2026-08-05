@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from datetime import datetime
 
 from rich.text import Text
 from textual import work
@@ -172,12 +173,16 @@ class ProxyMonitorApp(App):
 
     def _render_details(self, row: MonitorRow):
         blocked = ", ".join(row.blockers) or "none"
+        first_seen = self._timestamp(row.first_seen_at)
+        last_failure = self._timestamp(row.last_failure_at)
         detail = Text.from_markup(
             f"[bold]{row.connection}[/bold]  [{self._state_color(row.state)}]{row.state}[/]\n"
             f"Country: {row.country}    Alive: {format_duration(row.alive_seconds)}    "
             f"Checks: {row.checks}/{row.required_checks}    Streak: {row.streak}    Success: {row.success_rate:.1%}\n"
             f"Median: {self._milliseconds(row.median_latency)}    P95: {self._milliseconds(row.p95_latency)}    "
-            f"Jitter: {row.jitter}ms    Blocked by: {blocked}"
+            f"Jitter: {row.jitter}ms    Blocked by: {blocked}\n"
+            f"First seen: {first_seen}    Observed uptime: {format_duration(row.total_observed_uptime)}    "
+            f"Last failure: {last_failure}"
         )
         self.query_one("#details", Static).update(detail)
 
@@ -232,6 +237,10 @@ class ProxyMonitorApp(App):
     @staticmethod
     def _milliseconds(value):
         return f"{value}ms" if value is not None else "-"
+
+    @staticmethod
+    def _timestamp(value):
+        return datetime.fromtimestamp(value).astimezone().strftime("%Y-%m-%d %H:%M:%S") if value else "-"
 
     @staticmethod
     def _latency_sort_key(value):

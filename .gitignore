@@ -16,3 +16,7 @@ env/
 .DS_Store
 .aider*
 working*
+proxytools.db
+proxytools.db-wal
+proxytools.db-shm
+proxytools.lock

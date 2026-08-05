@@ -43,4 +43,15 @@ def main(argv=None):
 
     from importlib import import_module
 
-    return import_module(module_name).main(args)
+    module = import_module(module_name)
+    if any(arg in {"-h", "--help"} for arg in args):
+        return module.main(args)
+
+    from proxytools.process_lock import AlreadyRunning, ProcessLock
+
+    try:
+        with ProcessLock(command):
+            return module.main(args)
+    except AlreadyRunning as error:
+        print(f"proxytools: {error}", file=sys.stderr)
+        return 1
