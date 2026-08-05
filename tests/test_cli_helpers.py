@@ -4,16 +4,12 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from proxylib import ProxyResult
-from proxylister import filter_and_sort, web_url, write_results
-from proxymonitor import (
-    ProxyHistory,
-    StabilityConfig,
-    display_rows,
-    expire_histories,
-    format_duration,
-    update_advertised,
-)
+from proxytools.commands.scan import web_url
+from proxytools.models import ProxyResult
+from proxytools.output.dashboard import display_rows, format_duration
+from proxytools.output.serializers import filter_and_sort, write_results
+from proxytools.stability import ProxyHistory, StabilityConfig, StabilityPolicy
+from proxytools.stability.history import expire_histories, update_advertised
 
 
 class CliHelperTests(unittest.TestCase):
@@ -60,14 +56,15 @@ class CliHelperTests(unittest.TestCase):
             max_latency=500,
             max_jitter=150,
         )
+        policy = StabilityPolicy(config)
         history = ProxyHistory("http", self.fast.proxy, config.history_size)
         for now, latency in ((100, 100), (130, 110), (159, 90)):
-            history.record(ProxyResult("http", self.fast.proxy, True, latency), now, config)
+            history.record(ProxyResult("http", self.fast.proxy, True, latency), now, policy)
         self.assertEqual(history.state, "PROBATION")
-        self.assertEqual(history.blockers(159, config), ["alive"])
-        history.record(ProxyResult("http", self.fast.proxy, True, 105), 160, config)
+        self.assertEqual(policy.blockers(history, 159), ["alive"])
+        history.record(ProxyResult("http", self.fast.proxy, True, 105), 160, policy)
         self.assertEqual(history.state, "STABLE")
-        self.assertEqual(history.blockers(160, config), [])
+        self.assertEqual(policy.blockers(history, 160), [])
         self.assertEqual(history.alive_for(160), 60)
         self.assertEqual(history.stable_since, 160)
         self.assertEqual(history.success_rate, 1)
@@ -77,15 +74,16 @@ class CliHelperTests(unittest.TestCase):
 
     def test_failure_degrades_and_resets_continuous_alive_time(self):
         config = StabilityConfig(min_checks=1, min_success_streak=1, min_alive_time=0)
+        policy = StabilityPolicy(config)
         history = ProxyHistory("http", self.fast.proxy, config.history_size)
-        history.record(self.fast, 100, config)
+        history.record(self.fast, 100, policy)
         self.assertEqual(history.state, "STABLE")
-        history.record(ProxyResult("http", self.fast.proxy, False), 110, config)
+        history.record(ProxyResult("http", self.fast.proxy, False), 110, policy)
         self.assertEqual(history.state, "DEGRADED")
-        self.assertIn("failed", history.blockers(110, config))
+        self.assertIn("failed", policy.blockers(history, 110))
         self.assertIsNone(history.alive_since)
         self.assertIsNone(history.stable_since)
-        history.record(self.fast, 120, config)
+        history.record(self.fast, 120, policy)
         self.assertEqual(history.state, "DEGRADED")
 
     def test_failure_tolerance_preserves_alive_origin(self):
@@ -95,11 +93,12 @@ class CliHelperTests(unittest.TestCase):
             min_alive_time=0,
             failure_tolerance=1,
         )
+        policy = StabilityPolicy(config)
         history = ProxyHistory("http", self.fast.proxy, config.history_size)
-        history.record(self.fast, 100, config)
-        history.record(ProxyResult("http", self.fast.proxy, False), 110, config)
+        history.record(self.fast, 100, policy)
+        history.record(ProxyResult("http", self.fast.proxy, False), 110, policy)
         self.assertEqual(history.alive_since, 100)
-        history.record(ProxyResult("http", self.fast.proxy, False), 120, config)
+        history.record(ProxyResult("http", self.fast.proxy, False), 120, policy)
         self.assertIsNone(history.alive_since)
 
     def test_stable_only_and_duration_format(self):

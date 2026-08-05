@@ -1,1 +1,2 @@
 requests[socks]
+selenium>=4.10

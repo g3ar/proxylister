@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "proxytools"
+version = "0.1.0"
+description = "CLI tools for discovering and monitoring public proxies"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = ["requests[socks]", "selenium>=4.10"]
+
+[project.scripts]
+proxytools = "proxytools.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

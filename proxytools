@@ -1,0 +1,72 @@
+#!/bin/sh
+# Unified project launcher. It bootstraps an isolated Python environment on the
+# first real command, then delegates to the corresponding internal CLI module.
+
+set -eu
+
+PROJECT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+VENV_DIR="$PROJECT_DIR/.venv"
+
+show_help() {
+    printf '%s\n' \
+        'Usage: ./proxytools <command> [options]' \
+        '' \
+        'Commands:' \
+        '  scan       Find, check, and export working proxies' \
+        '  monitor    Monitor proxies until they meet stability criteria' \
+        '  countries  Show a country summary or list available countries' \
+        '  help       Show this help' \
+        '' \
+        'Run ./proxytools <command> --help for command-specific options.' \
+        'On first use, a local .venv and the required dependencies are created automatically.'
+}
+
+if [ "$#" -eq 0 ]; then
+    show_help
+    exit 0
+fi
+
+COMMAND=$1
+shift
+
+case "$COMMAND" in
+    help|-h|--help)
+        show_help
+        exit 0
+        ;;
+    --version)
+        ;;
+    scan)
+        ;;
+    monitor)
+        ;;
+    countries)
+        ;;
+    *)
+        printf 'proxytools: unknown command: %s\n\n' "$COMMAND" >&2
+        show_help >&2
+        exit 2
+        ;;
+esac
+
+if [ ! -x "$VENV_DIR/bin/python" ]; then
+    if ! command -v python3 >/dev/null 2>&1; then
+        printf 'proxytools: python3 is required but was not found in PATH\n' >&2
+        exit 1
+    fi
+    printf 'Creating local Python environment in %s ...\n' "$VENV_DIR" >&2
+    python3 -m venv "$VENV_DIR"
+fi
+
+BASE_STAMP="$VENV_DIR/.proxytools-requirements"
+if ! cmp -s "$PROJECT_DIR/requirements.txt" "$BASE_STAMP" 2>/dev/null || \
+   ! "$VENV_DIR/bin/python" -c 'import requests, socks, selenium' >/dev/null 2>&1; then
+    printf 'Installing dependencies ...\n' >&2
+    "$VENV_DIR/bin/python" -m pip install -r "$PROJECT_DIR/requirements.txt"
+    cp "$PROJECT_DIR/requirements.txt" "$BASE_STAMP"
+fi
+
+cd "$PROJECT_DIR"
+PYTHONPATH="$PROJECT_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH
+exec "$VENV_DIR/bin/python" -m proxytools "$COMMAND" "$@"

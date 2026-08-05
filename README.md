@@ -1,37 +1,44 @@
 # Proxy Tools
 
-Three small CLI tools for working with free proxies from [ProxyScrape](https://proxyscrape.com/free-proxy-list), sharing a common library:
+`proxytools` is a single CLI application for working with free proxies from [ProxyScrape](https://proxyscrape.com/free-proxy-list). It provides three subcommands:
 
-- **`proxylister.py`** — one-shot scan: fetch, check, geolocate, and save working proxies to a file. Optional HTTP preflight and Selenium validation against a real URL.
-- **`proxymonitor.py`** — live dashboard: continuously re-scans and shows currently-working proxies in a color-coded terminal table. No file output.
-- **`proxycountry.py`** — country breakdown of valid proxies, plus a fast country-list mode.
-- **`proxylib.py`** — shared fetching/checking logic and typed result models. Not run directly.
+- **`scan`** — one-shot fetch, check, geolocation, export, and optional browser validation.
+- **`monitor`** — continuous stability monitoring in a live terminal dashboard.
+- **`countries`** — country breakdown of valid proxies or a fast advertised-country list.
 
 ## Requirements
 
 - Python 3.10+
 - `requests[socks]` (includes PySocks for `socks4`/`socks5` proxies)
-- `selenium>=4.10` and Google Chrome — only needed for `proxylister.py --check-url`. Selenium Manager (bundled since 4.6) auto-downloads a matching ChromeDriver, so no manual driver setup is needed.
-- `proxymonitor.py` uses the standard-library `curses` module. On Windows, install `windows-curses` first (`curses` isn't available there by default).
+- `selenium>=4.10` is installed with the base dependencies but used only by `scan --check-url`. Google Chrome is required for that mode; Selenium Manager downloads a matching ChromeDriver automatically.
+- `monitor` uses the standard-library `curses` module. On Windows, install `windows-curses` first.
 
 ## Installation
 
-```bash
-python -m venv venv
-source venv/bin/activate  # on Windows: venv\Scripts\activate
+Clone the repository and use the single root launcher:
 
-pip install -r requirements.txt
-pip install -r requirements-selenium.txt  # only if you'll use --check-url
+```bash
+git clone <repository-url>
+cd proxylister
+./proxytools --help
 ```
 
-Keep the four Python files together in the same directory — all three CLI tools import from `proxylib.py`.
+On the first real command, `./proxytools` creates an ignored `.venv` and installs all Python dependencies automatically. Selenium is imported and invoked only when `scan --check-url` is requested. Python 3 with the standard `venv` module must be available on the host.
 
-## proxylister.py
+`./proxytools` is the only supported user-facing entrypoint:
+
+```bash
+./proxytools scan --help
+./proxytools monitor --help
+./proxytools countries --help
+```
+
+## `scan`
 
 Fetches proxies for all protocols (`http`, `socks4`, `socks5`), dedupes them, checks which are alive concurrently, geolocates each, and writes the ones under `--max-latency` to a file, sorted fastest first.
 
 ```bash
-python proxylister.py --timeout 5 --workers 50 --output working.txt --max-latency 500
+./proxytools scan --timeout 5 --workers 50 --output working.txt --max-latency 500
 ```
 
 ### Options
@@ -68,12 +75,12 @@ Example:
 
 Fast proxies first receive a lightweight HTTP check against the target URL. Those that pass are sent to a separate browser-worker pool, so Chrome does not block collection of network-check results. A proxy is dropped if the page fails to load, Chrome shows an internal network-error page, or the main document has an HTTP error status. On success a visible window stays open for 10 seconds; headless mode skips that delay. The page-load timeout is `2 × --max-latency`, floored at 10s.
 
-## proxymonitor.py
+## `monitor`
 
 Runs forever and keeps a rolling check history for each proxy. New candidates start in `PROBATION`, become `STABLE` only after satisfying every configured time and quality threshold, and change to `DEGRADED` after a failure. Green, yellow, and red rows represent those states. Nothing is written to disk.
 
 ```bash
-python proxymonitor.py --timeout 5 --workers 50 --max-latency 500 --min-alive-time 60
+./proxytools monitor --timeout 5 --workers 50 --max-latency 500 --min-alive-time 60
 ```
 
 | Flag | Description | Default |
@@ -99,13 +106,13 @@ The table is capped to what fits the terminal window, but hidden rows retain the
 
 A successful check requires a duration below `--max-latency`. By default, any failed check resets continuous live time. Setting `--alive-failure-tolerance 1`, for example, preserves the original live-time counter through one isolated failure, although the proxy still becomes `DEGRADED` immediately.
 
-## proxycountry.py
+## `countries`
 
 Print a country summary, or fetch only ProxyScrape's advertised country list without downloading and checking every proxy:
 
 ```bash
-python proxycountry.py --timeout 5 --workers 50 --max-latency 500
-python proxycountry.py --list-countries
+./proxytools countries --timeout 5 --workers 50 --max-latency 500
+./proxytools countries --list-countries
 ```
 
 ## Tests
@@ -113,7 +120,27 @@ python proxycountry.py --list-countries
 The standard-library test suite mocks all network access:
 
 ```bash
-python -m unittest discover -v
+PYTHONPATH=src python -m unittest discover -v
+```
+
+## Project structure
+
+The application uses a `src` package layout. Command modules only orchestrate
+the independent domain and adapter layers:
+
+```text
+proxytools                 root launcher and environment bootstrap
+pyproject.toml             package metadata and installed console script
+src/proxytools/
+  cli.py                   top-level command dispatcher
+  commands/                scan, monitor, and countries orchestration
+  sources/                 ProxyScrape API adapter
+  checking/                HTTP and optional browser validation
+  stability/               rolling history and stability policy
+  output/                  serializers and curses dashboard
+  models.py                shared domain records
+  config.py                shared CLI value validation
+tests/                     isolated unit tests with mocked network access
 ```
 
 ## Notes
