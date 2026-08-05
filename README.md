@@ -80,6 +80,8 @@ Runs forever and keeps a rolling check history for each proxy. New candidates st
 
 Monitor state is stored in `proxytools.db` beside the root launcher. Each clone therefore has an independent database. Recent checks restore the rolling history after a restart, but a pause longer than twice `--refresh-interval` is not counted as continuous uptime. Detailed checks are retained for 24 hours; lifetime counters and state transitions remain in the database. SQLite WAL companion files are expected while the monitor is running. All database and lock files are ignored by Git.
 
+At startup, saved proxies and their last known statuses are loaded before any ProxyScrape request. A `*` on a status means it came from the database and is awaiting verification. Saved proxies are checked first; then ProxyScrape is fetched and only newly discovered addresses are checked, so an overlapping proxy is never checked twice in the startup cycle. The normal refresh cycles begin afterward.
+
 ```bash
 ./proxytools monitor --timeout 5 --workers 50 --max-latency 500 --min-alive-time 60
 ```

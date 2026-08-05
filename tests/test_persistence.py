@@ -50,6 +50,18 @@ class PersistenceTests(unittest.TestCase):
         self.assertIsNone(history.alive_since)
         self.assertEqual(history.state, "PROBATION")
 
+    def test_last_known_status_is_restored_until_first_fresh_check(self):
+        result = ProxyResult("http", "1.2.3.4:80", True, 42, "France")
+        self.repository.save_checks(
+            [CheckObservation(result, 100, True, "PROBATION", "STABLE")], 20
+        )
+        history = self.repository.load_histories(
+            self.policy, retention_time=1, restart_tolerance=20, now_wall=1000, now_mono=500
+        )[result.key]
+        self.assertEqual(history.state, "STABLE")
+        self.assertTrue(history.restored)
+        self.assertIsNone(history.alive_since)
+
     def test_short_restart_gap_preserves_continuity(self):
         result = ProxyResult("http", "1.2.3.4:80", True, 42, "France")
         self.repository.save_checks(

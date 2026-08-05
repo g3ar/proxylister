@@ -147,11 +147,14 @@ class StateRepository:
         now_mono = time.monotonic() if now_mono is None else now_mono
         histories = {}
         proxies = self.connection.execute(
-            """SELECT id,protocol,address,first_seen_at,total_observed_uptime,last_failure_at,last_checked_at
-               FROM proxies WHERE last_seen_at >= ?""",
-            (now_wall - retention_time,),
+            """SELECT id,protocol,address,country,lat,lon,first_seen_at,total_observed_uptime,
+                      last_failure_at,last_checked_at,last_check_ok,current_state
+               FROM proxies ORDER BY
+                   CASE current_state WHEN 'STABLE' THEN 0 WHEN 'DEGRADED' THEN 1 ELSE 2 END,
+                   last_checked_at DESC"""
         ).fetchall()
-        for proxy_id, protocol, address, first_seen, uptime, last_failure, last_checked in proxies:
+        for (proxy_id, protocol, address, country, lat, lon, first_seen, uptime,
+             last_failure, last_checked, last_check_ok, stored_state) in proxies:
             history = ProxyHistory(protocol, address, policy.config.history_size)
             history.first_seen_at = first_seen
             history.total_observed_uptime = uptime
@@ -167,11 +170,16 @@ class StateRepository:
                 synthetic_now = now_mono - max(0, now_wall - checked_at)
                 result = ProxyResult(protocol, address, bool(ok), latency, country, lat, lon)
                 history.record(result, synthetic_now, policy)
+            if history.latest is None:
+                history.latest = ProxyResult(
+                    protocol, address, bool(last_check_ok), None, country, lat, lon
+                )
             history.last_advertised_at = now_mono
             if last_checked is None or now_wall - last_checked > restart_tolerance:
                 history.alive_since = None
                 history.stable_since = None
-                history.state = "PROBATION"
+            history.state = stored_state
+            history.restored = True
             histories[history.key] = history
         return histories
 

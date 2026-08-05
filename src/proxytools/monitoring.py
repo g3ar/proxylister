@@ -34,6 +34,7 @@ class MonitorRow:
     total_observed_uptime: float = 0
     last_failure_at: float | None = None
     last_checked_at: float | None = None
+    restored: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +111,7 @@ class MonitorEngine:
                     total_observed_uptime=history.total_observed_uptime,
                     last_failure_at=history.last_failure_at,
                     last_checked_at=history.samples[-1].checked_at if history.samples else None,
+                    restored=history.restored,
                 )
             )
         state_order = {"STABLE": 0, "PROBATION": 1, "DEGRADED": 2}
@@ -133,68 +135,27 @@ class MonitorEngine:
         )
 
     def run(self, stop: threading.Event, publish: Callable[[MonitorSnapshot], None]):
+        self.cycle = 1
+        saved_keys = set(self.histories)
+        if saved_keys:
+            self._check_candidates(
+                list(self.histories), stop, publish, phase="restoring"
+            )
+        first_source_cycle = True
         while not stop.is_set():
             self._refresh_requested.clear()
-            self.cycle += 1
             publish(self.snapshot(phase="fetching"))
             entries = self.fetcher()
             now = time.monotonic()
             update_advertised(self.histories, entries, now, self.policy.config.history_size)
             expire_histories(self.histories, now, self.retention_time)
-            candidates = list(self.histories)
-            checked = 0
-            last_publish_at = 0.0
-            publish(self.snapshot(checked, len(candidates), "checking"))
-
-            executor = concurrent.futures.ThreadPoolExecutor(max_workers=self.workers)
-            pending = {
-                executor.submit(self.checker, protocol, proxy, self.timeout, self.samples)
-                for protocol, proxy in candidates
-            }
-            try:
-                while pending and not stop.is_set():
-                    done, pending = concurrent.futures.wait(
-                        pending,
-                        timeout=0.1,
-                        return_when=concurrent.futures.FIRST_COMPLETED,
-                    )
-                    for future in done:
-                        result = future.result()
-                        checked += 1
-                        history = self.histories.get(result.key)
-                        if history is not None:
-                            checked_mono = time.monotonic()
-                            checked_wall = time.time()
-                            old_state = history.state
-                            previous = history.samples[-1] if history.samples else None
-                            history.record(result, checked_mono, self.policy)
-                            accepted = history.samples[-1].ok
-                            if history.first_seen_at is None:
-                                history.first_seen_at = checked_wall
-                            if accepted and previous is not None and previous.ok:
-                                gap = checked_mono - previous.checked_at
-                                if 0 <= gap <= self.continuity_tolerance:
-                                    history.total_observed_uptime += gap
-                            if not accepted:
-                                history.last_failure_at = checked_wall
-                            if self.repository is not None:
-                                reason = ", ".join(self.policy.blockers(history, checked_mono))
-                                self._pending_observations.append(
-                                    CheckObservation(result, checked_wall, accepted, old_state, history.state, reason)
-                                )
-                                if len(self._pending_observations) >= 100:
-                                    self._flush()
-                    publish_now = time.monotonic()
-                    if done and (checked == len(candidates) or publish_now - last_publish_at >= 0.2):
-                        publish(self.snapshot(checked, len(candidates), "checking"))
-                        last_publish_at = publish_now
-            finally:
-                # Running requests cannot be force-cancelled safely. During
-                # shutdown wait here, while the TUI is still visible, instead
-                # of returning early and leaving Python to wait invisibly at
-                # interpreter exit. Futures that have not started are dropped.
-                executor.shutdown(wait=stop.is_set(), cancel_futures=True)
-            self._flush()
+            if first_source_cycle:
+                candidates = [key for key in entries if key not in saved_keys]
+                phase = "checking_new"
+            else:
+                candidates = list(self.histories)
+                phase = "checking"
+            checked = self._check_candidates(candidates, stop, publish, phase=phase)
             if self.repository is not None and self.cycle % 10 == 0:
                 self.repository.prune_checks(time.time() - 86400)
             if stop.is_set():
@@ -211,6 +172,66 @@ class MonitorEngine:
                 if remaining <= 0:
                     break
                 stop.wait(min(0.2, remaining))
+            first_source_cycle = False
+            self.cycle += 1
+
+    def _check_candidates(self, candidates, stop, publish, *, phase):
+        """Check one ordered candidate batch and publish incremental progress."""
+        checked = 0
+        last_publish_at = 0.0
+        publish(self.snapshot(checked, len(candidates), phase))
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=self.workers)
+        pending = {
+            executor.submit(self.checker, protocol, proxy, self.timeout, self.samples)
+            for protocol, proxy in candidates
+        }
+        try:
+            while pending and not stop.is_set():
+                done, pending = concurrent.futures.wait(
+                    pending,
+                    timeout=0.1,
+                    return_when=concurrent.futures.FIRST_COMPLETED,
+                )
+                for future in done:
+                    result = future.result()
+                    checked += 1
+                    history = self.histories.get(result.key)
+                    if history is not None:
+                        self._record_result(history, result)
+                publish_now = time.monotonic()
+                if done and (checked == len(candidates) or publish_now - last_publish_at >= 0.2):
+                    publish(self.snapshot(checked, len(candidates), phase))
+                    last_publish_at = publish_now
+        finally:
+            # Running requests cannot be force-cancelled safely. During
+            # shutdown wait here while the TUI still displays its message.
+            executor.shutdown(wait=stop.is_set(), cancel_futures=True)
+        self._flush()
+        return checked
+
+    def _record_result(self, history, result):
+        checked_mono = time.monotonic()
+        checked_wall = time.time()
+        old_state = history.state
+        previous = history.samples[-1] if history.samples else None
+        history.record(result, checked_mono, self.policy)
+        accepted = history.samples[-1].ok
+        if history.first_seen_at is None:
+            history.first_seen_at = checked_wall
+        if accepted and previous is not None and previous.ok:
+            gap = checked_mono - previous.checked_at
+            if 0 <= gap <= self.continuity_tolerance:
+                history.total_observed_uptime += gap
+        if not accepted:
+            history.last_failure_at = checked_wall
+        if self.repository is not None:
+            reason = ", ".join(self.policy.blockers(history, checked_mono))
+            self._pending_observations.append(
+                CheckObservation(result, checked_wall, accepted, old_state, history.state, reason)
+            )
+            if len(self._pending_observations) >= 100:
+                self._flush()
+
     def _flush(self):
         if self.repository is not None and self._pending_observations:
             pending, self._pending_observations = self._pending_observations, []

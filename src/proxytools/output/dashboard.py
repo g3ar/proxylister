@@ -177,7 +177,9 @@ class ProxyMonitorApp(App):
                 table.add_row(*cells, key=key)
                 self.cells_by_key[key] = cells
         self.rows_by_key = next_rows
-        cycle_complete = snapshot.checked == snapshot.total and snapshot.phase in {"checking", "waiting"}
+        cycle_complete = snapshot.checked == snapshot.total and snapshot.phase in {
+            "restoring", "checking_new", "checking", "waiting"
+        }
         if cycle_complete:
             table.sort("median", key=self._latency_sort_key)
             self.completed_cycle = snapshot.cycle
@@ -192,7 +194,9 @@ class ProxyMonitorApp(App):
 
     def _render_status(self, snapshot: MonitorSnapshot, visible: int):
         phase = {
+            "restoring": f"Rechecking saved proxies {snapshot.checked}/{snapshot.total}",
             "fetching": "Fetching ProxyScrape lists…",
+            "checking_new": f"Checking new proxies {snapshot.checked}/{snapshot.total}",
             "checking": f"Checking {snapshot.checked}/{snapshot.total}",
             "waiting": f"Next cycle in {snapshot.next_cycle_in}s",
         }.get(snapshot.phase, snapshot.phase.title())
@@ -213,8 +217,9 @@ class ProxyMonitorApp(App):
         blocked = ", ".join(row.blockers) or "none"
         first_seen = self._timestamp(row.first_seen_at)
         last_failure = self._timestamp(row.last_failure_at)
+        restored = "  [yellow]Restored from database; awaiting verification[/]" if row.restored else ""
         detail = Text.from_markup(
-            f"[bold]{row.connection}[/bold]  [{self._state_color(row.state)}]{row.state}[/]\n"
+            f"[bold]{row.connection}[/bold]  [{self._state_color(row.state)}]{row.state}{'*' if row.restored else ''}[/]{restored}\n"
             f"Country: {row.country}    Alive: {format_duration(row.alive_seconds)}    "
             f"Checks: {row.checks}/{row.required_checks}    Streak: {row.streak}    Success: {row.success_rate:.1%}\n"
             f"Median: {self._milliseconds(row.median_latency)}    P95: {self._milliseconds(row.p95_latency)}    "
@@ -344,11 +349,11 @@ class ProxyMonitorApp(App):
 
     @classmethod
     def _state_text(cls, state):
-        return Text(state, style=cls._state_color(state))
+        return Text(state, style=cls._state_color(state.removesuffix("*")))
 
     def _row_cells(self, row: MonitorRow):
         return (
-            self._state_text(row.state),
+            self._state_text(f"{row.state}{'*' if row.restored else ''}"),
             format_duration(row.alive_seconds),
             f"{row.checks}/{row.required_checks}",
             str(row.streak),

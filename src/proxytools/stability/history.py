@@ -34,6 +34,7 @@ class ProxyHistory:
     first_seen_at: float | None = None
     total_observed_uptime: float = 0
     last_failure_at: float | None = None
+    restored: bool = False
 
     def __post_init__(self):
         self.samples = deque(maxlen=self.history_size)
@@ -71,6 +72,7 @@ class ProxyHistory:
         return max(0, now - self.alive_since) if self.alive_since is not None else 0
 
     def record(self, result: ProxyResult, now: float, policy: StabilityPolicy) -> None:
+        self.restored = False
         config = policy.config
         succeeded = result.ok and result.latency_ms is not None and result.latency_ms < config.max_latency
         self.samples.append(CheckSample(now, succeeded, result.latency_ms if succeeded else None))
