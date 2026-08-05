@@ -97,6 +97,7 @@ class ProxyMonitorApp(App):
         self.browser = browser
         self.browser_url = browser_url
         self.browser_process = None
+        self.stopping = False
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -118,10 +119,20 @@ class ProxyMonitorApp(App):
 
     @work(thread=True, exclusive=True, group="monitor")
     def monitor_worker(self):
-        self.engine.run(
-            self.stop_event,
-            lambda snapshot: self.call_from_thread(self.receive_snapshot, snapshot),
-        )
+        try:
+            self.engine.run(
+                self.stop_event,
+                lambda snapshot: self.call_from_thread(self.receive_snapshot, snapshot),
+            )
+        finally:
+            try:
+                self.call_from_thread(self.monitor_stopped)
+            except RuntimeError:
+                pass
+
+    def monitor_stopped(self):
+        if self.stopping:
+            self.exit()
 
     def receive_snapshot(self, snapshot: MonitorSnapshot):
         self.latest_snapshot = snapshot
@@ -301,9 +312,17 @@ class ProxyMonitorApp(App):
             self.notify("Browser session closed")
 
     def action_quit(self):
+        if self.stopping:
+            return
+        self.stopping = True
         self.stop_event.set()
         self.engine.request_refresh()
-        self.exit()
+        self.query_one("#status", Static).update(
+            "Stopping… waiting for active network requests to finish or reach their timeout."
+        )
+        self.notify("Stopping monitor…", timeout=3)
+        if not self.autostart:
+            self.exit()
 
     @staticmethod
     def _milliseconds(value):

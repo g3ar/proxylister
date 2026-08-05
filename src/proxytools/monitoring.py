@@ -189,7 +189,11 @@ class MonitorEngine:
                         publish(self.snapshot(checked, len(candidates), "checking"))
                         last_publish_at = publish_now
             finally:
-                executor.shutdown(wait=False, cancel_futures=True)
+                # Running requests cannot be force-cancelled safely. During
+                # shutdown wait here, while the TUI is still visible, instead
+                # of returning early and leaving Python to wait invisibly at
+                # interpreter exit. Futures that have not started are dropped.
+                executor.shutdown(wait=stop.is_set(), cancel_futures=True)
             self._flush()
             if self.repository is not None and self.cycle % 10 == 0:
                 self.repository.prune_checks(time.time() - 86400)
