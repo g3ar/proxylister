@@ -61,6 +61,19 @@ class ProxyMonitorApp(App):
         Binding("r", "refresh", "Refresh"),
         Binding("escape", "cancel_filter", "Cancel filter", show=False),
     ]
+    COLUMNS = (
+        ("State", "state"),
+        ("Alive", "alive"),
+        ("Checks", "checks"),
+        ("Streak", "streak"),
+        ("OK", "success"),
+        ("Median", "median"),
+        ("P95", "p95"),
+        ("Jitter", "jitter"),
+        ("Country", "country"),
+        ("Blocked by", "blocked"),
+        ("Connection", "connection"),
+    )
 
     def __init__(self, engine: MonitorEngine, *, stable_only=False, autostart=True):
         super().__init__()
@@ -84,10 +97,7 @@ class ProxyMonitorApp(App):
 
     def on_mount(self):
         table = self.query_one("#table", DataTable)
-        table.add_columns(
-            "State", "Alive", "Checks", "Streak", "OK", "Median",
-            "P95", "Jitter", "Country", "Blocked by", "Connection",
-        )
+        table.add_columns(*self.COLUMNS)
         if self.autostart:
             self.monitor_worker()
 
@@ -113,32 +123,27 @@ class ProxyMonitorApp(App):
         table = self.query_one("#table", DataTable)
         selected_key = None
         if table.row_count:
-            try:
-                selected_key = str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
-            except Exception:
-                pass
-        table.clear()
-        self.rows_by_key.clear()
+            selected_key = str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
         rows = self.filtered_rows(snapshot)
+        next_rows = {f"{row.key[0]}|{row.key[1]}": row for row in rows}
+        rows_added = False
+        for removed_key in self.rows_by_key.keys() - next_rows.keys():
+            table.remove_row(removed_key)
         for row in rows:
             key = f"{row.key[0]}|{row.key[1]}"
-            self.rows_by_key[key] = row
-            table.add_row(
-                self._state_text(row.state),
-                format_duration(row.alive_seconds),
-                f"{row.checks}/{row.required_checks}",
-                str(row.streak),
-                f"{row.success_rate:.0%}",
-                self._milliseconds(row.median_latency),
-                self._milliseconds(row.p95_latency),
-                f"{row.jitter}ms",
-                row.country,
-                ",".join(row.blockers) or "-",
-                row.connection,
-                key=key,
-            )
-        if selected_key in self.rows_by_key:
-            table.move_cursor(row=table.get_row_index(selected_key), animate=False)
+            cells = self._row_cells(row)
+            if key in self.rows_by_key:
+                for (_, column_key), value in zip(self.COLUMNS, cells):
+                    table.update_cell(key, column_key, value, update_width=True)
+            else:
+                table.add_row(*cells, key=key)
+                rows_added = True
+        self.rows_by_key = next_rows
+        cycle_complete = snapshot.phase != "checking" or snapshot.checked == snapshot.total
+        if rows_added or cycle_complete:
+            table.sort("median", key=self._latency_sort_key)
+            if cycle_complete and selected_key in self.rows_by_key:
+                table.move_cursor(row=table.get_row_index(selected_key), animate=False)
         self._render_status(snapshot, len(rows))
         if rows:
             current_key = str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
@@ -229,12 +234,33 @@ class ProxyMonitorApp(App):
         return f"{value}ms" if value is not None else "-"
 
     @staticmethod
+    def _latency_sort_key(value):
+        if value == "-":
+            return float("inf")
+        return int(str(value).removesuffix("ms"))
+
+    @staticmethod
     def _state_color(state):
         return {"STABLE": "green", "PROBATION": "yellow", "DEGRADED": "red"}[state]
 
     @classmethod
     def _state_text(cls, state):
         return Text(state, style=cls._state_color(state))
+
+    def _row_cells(self, row: MonitorRow):
+        return (
+            self._state_text(row.state),
+            format_duration(row.alive_seconds),
+            f"{row.checks}/{row.required_checks}",
+            str(row.streak),
+            f"{row.success_rate:.0%}",
+            self._milliseconds(row.median_latency),
+            self._milliseconds(row.p95_latency),
+            f"{row.jitter}ms",
+            row.country,
+            ",".join(row.blockers) or "-",
+            row.connection,
+        )
 
     def filtered_rows(self, snapshot: MonitorSnapshot):
         country_filter = self.country_filter.casefold()

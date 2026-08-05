@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 
 from textual.widgets import DataTable, Static
 
@@ -41,8 +42,35 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.query_one(DataTable).row_count, 1)
             self.assertIn("Checking 4/10", str(app.query_one("#status", Static).content))
             self.assertIn("Blocked by: alive, checks", str(app.query_one("#details", Static).content))
+            second_row = replace(
+                row,
+                key=("http", "5.6.7.8:80"),
+                country="Germany",
+                connection="http://5.6.7.8:80",
+            )
+            two_rows = replace(snapshot, rows=(row, second_row), tracked_count=2)
+            app.receive_snapshot(two_rows)
+            table = app.query_one(DataTable)
+            table.move_cursor(row=1, animate=False)
+            app.receive_snapshot(
+                replace(two_rows, rows=(replace(row, alive_seconds=60.5), replace(second_row, alive_seconds=61)))
+            )
+            self.assertEqual(table.cursor_row, 1)
+            selected = table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value
+            self.assertEqual(selected, "http|5.6.7.8:80")
+            sorted_snapshot = replace(
+                two_rows,
+                checked=10,
+                total=10,
+                phase="waiting",
+                rows=(replace(row, median_latency=200), replace(second_row, median_latency=50)),
+            )
+            app.receive_snapshot(sorted_snapshot)
+            self.assertEqual(table.get_row_at(0)[5], "50ms")
+            selected = table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value
+            self.assertEqual(selected, "http|5.6.7.8:80")
             await pilot.press("c")
-            await pilot.press(*"germany", "enter")
+            await pilot.press(*"spain", "enter")
             await pilot.pause()
             self.assertEqual(app.query_one(DataTable).row_count, 0)
             await pilot.press("c")
