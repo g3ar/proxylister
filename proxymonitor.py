@@ -150,6 +150,25 @@ class ProxyHistory:
     def alive_for(self, now: float) -> float:
         return max(0, now - self.alive_since) if self.alive_since is not None else 0
 
+    def blockers(self, now: float, config: StabilityConfig) -> list[str]:
+        """Return the unmet stability criteria for dashboard diagnostics."""
+        reasons = []
+        if not self.samples or not self.samples[-1].ok:
+            reasons.append("failed")
+        if self.alive_for(now) < config.min_alive_time:
+            reasons.append("alive")
+        if len(self.samples) < config.min_checks:
+            reasons.append("checks")
+        if self.success_rate < config.min_success_rate:
+            reasons.append("rate")
+        if self.consecutive_successes < config.min_success_streak:
+            reasons.append("streak")
+        if self.median_latency is None or self.median_latency >= config.max_latency:
+            reasons.append("latency")
+        if self.jitter > config.max_jitter:
+            reasons.append("jitter")
+        return reasons
+
     def record(self, result: ProxyResult, now: float, config: StabilityConfig) -> None:
         succeeded = result.ok and result.latency_ms is not None and result.latency_ms < config.max_latency
         self.samples.append(CheckSample(now, succeeded, result.latency_ms if succeeded else None))
@@ -167,16 +186,7 @@ class ProxyHistory:
             if self.consecutive_failures > config.failure_tolerance:
                 self.alive_since = None
 
-        qualifies = (
-            succeeded
-            and len(self.samples) >= config.min_checks
-            and self.success_rate >= config.min_success_rate
-            and self.consecutive_successes >= config.min_success_streak
-            and self.alive_for(now) >= config.min_alive_time
-            and self.median_latency is not None
-            and self.median_latency < config.max_latency
-            and self.jitter <= config.max_jitter
-        )
+        qualifies = not self.blockers(now, config)
         if qualifies:
             if self.state != "STABLE":
                 self.stable_since = now
@@ -188,7 +198,7 @@ class ProxyHistory:
 
 
 def format_duration(seconds: float) -> str:
-    total = max(0, round(seconds))
+    total = max(0, int(seconds))
     hours, remainder = divmod(total, 3600)
     minutes, secs = divmod(remainder, 60)
     return f"{hours:02d}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:02d}:{secs:02d}"
@@ -243,7 +253,7 @@ def max_visible_rows(stdscr):
     return max(height - FIXED_HEADER_LINES - 1, 1)
 
 
-def render(stdscr, histories, cycle, checked, total, max_rows, paused, stable_only):
+def render(stdscr, histories, cycle, checked, total, max_rows, paused, stable_only, config):
     now = time.monotonic()
     all_rows = display_rows(histories, stable_only)
     rows = all_rows[:max_rows]
@@ -255,7 +265,10 @@ def render(stdscr, histories, cycle, checked, total, max_rows, paused, stable_on
         status += "  [PAUSED]"
     safe_addnstr(stdscr, 0, 0, status, width - 1, curses.A_BOLD | (curses.A_REVERSE if paused else 0))
     safe_addnstr(stdscr, 1, 0, "q: quit   p: pause/resume", width - 1, curses.A_DIM)
-    header = f"{'STATE':<9} {'ALIVE':>8} {'OK':>7} {'MED':>6} {'P95':>6} {'JIT':>5} {'COUNTRY':<16} CONNECTION"
+    header = (
+        f"{'STATE':<9} {'ALIVE':>8} {'CHK':>5} {'STR':>3} {'OK':>4} "
+        f"{'MED':>6} {'P95':>6} {'JIT':>5} {'COUNTRY':<12} {'BLOCKED BY':<18} CONNECTION"
+    )
     safe_addnstr(stdscr, 3, 0, header, width - 1, curses.A_UNDERLINE)
     for index, item in enumerate(rows):
         y = FIXED_HEADER_LINES + index
@@ -265,9 +278,12 @@ def render(stdscr, histories, cycle, checked, total, max_rows, paused, stable_on
         ratio = f"{round(item.success_rate * 100):>3}%"
         median = f"{item.median_latency}ms" if item.median_latency is not None else "-"
         p95 = f"{item.p95_latency}ms" if item.p95_latency is not None else "-"
+        checks = f"{len(item.samples)}/{config.min_checks}"
+        blocked_by = ",".join(item.blockers(now, config)) or "-"
         line = (
-            f"{item.state:<9} {format_duration(item.alive_for(now)):>8} {ratio:>7} "
-            f"{median:>6} {p95:>6} {item.jitter:>3}ms {latest.country[:16]:<16} "
+            f"{item.state:<9} {format_duration(item.alive_for(now)):>8} {checks:>5} "
+            f"{item.consecutive_successes:>3} {ratio:>4} {median:>6} {p95:>6} "
+            f"{item.jitter:>3}ms {latest.country[:12]:<12} {blocked_by:<18} "
             f"{connection_string(item.protocol, item.proxy)}"
         )
         safe_addnstr(stdscr, y, 0, line, width - 1, state_color(item.state))
@@ -343,7 +359,7 @@ def run(stdscr, args):
             checked = 0
             if not candidates:
                 if not paused:
-                    render(stdscr, histories, cycle, 0, 0, max_rows, paused, args.stable_only)
+                    render(stdscr, histories, cycle, 0, 0, max_rows, paused, args.stable_only, config)
             else:
                 executor = concurrent.futures.ThreadPoolExecutor(max_workers=args.workers)
                 pending = {
@@ -369,14 +385,20 @@ def run(stdscr, args):
                                 result.checked_at = time.strftime("%H:%M:%S")
                                 history.record(result, time.monotonic(), config)
                         if (done or key_toggled) and not paused:
-                            render(stdscr, histories, cycle, checked, len(candidates), max_rows, paused, args.stable_only)
+                            render(
+                                stdscr, histories, cycle, checked, len(candidates),
+                                max_rows, paused, args.stable_only, config,
+                            )
                 finally:
                     executor.shutdown(wait=False, cancel_futures=True)
                 if quit_requested:
                     break
 
             if not paused:
-                render(stdscr, histories, cycle, checked, len(candidates), max_rows, paused, args.stable_only)
+                render(
+                    stdscr, histories, cycle, checked, len(candidates),
+                    max_rows, paused, args.stable_only, config,
+                )
             should_quit, toggled = wait_for_next_cycle(stdscr, args.refresh_interval)
             paused ^= toggled
             if should_quit:

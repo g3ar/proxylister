@@ -64,8 +64,10 @@ class CliHelperTests(unittest.TestCase):
         for now, latency in ((100, 100), (130, 110), (159, 90)):
             history.record(ProxyResult("http", self.fast.proxy, True, latency), now, config)
         self.assertEqual(history.state, "PROBATION")
+        self.assertEqual(history.blockers(159, config), ["alive"])
         history.record(ProxyResult("http", self.fast.proxy, True, 105), 160, config)
         self.assertEqual(history.state, "STABLE")
+        self.assertEqual(history.blockers(160, config), [])
         self.assertEqual(history.alive_for(160), 60)
         self.assertEqual(history.stable_since, 160)
         self.assertEqual(history.success_rate, 1)
@@ -80,6 +82,7 @@ class CliHelperTests(unittest.TestCase):
         self.assertEqual(history.state, "STABLE")
         history.record(ProxyResult("http", self.fast.proxy, False), 110, config)
         self.assertEqual(history.state, "DEGRADED")
+        self.assertIn("failed", history.blockers(110, config))
         self.assertIsNone(history.alive_since)
         self.assertIsNone(history.stable_since)
         history.record(self.fast, 120, config)
@@ -108,6 +111,7 @@ class CliHelperTests(unittest.TestCase):
         rows = display_rows({stable.key: stable, probation.key: probation}, stable_only=True)
         self.assertEqual(rows, [stable])
         self.assertEqual(format_duration(65), "01:05")
+        self.assertEqual(format_duration(299.9), "04:59")
 
 
 if __name__ == "__main__":

@@ -95,7 +95,7 @@ python proxymonitor.py --timeout 5 --workers 50 --max-latency 500 --min-alive-ti
 
 **Controls:** `q` quits, `p` pauses/resumes the display (checks keep running in the background while paused).
 
-The table is capped to what fits the terminal window, but hidden rows retain their history. It shows state, continuous live time, rolling success rate, median latency, p95 latency, jitter, country, and connection string. A proxy that disappears from ProxyScrape continues to be checked until `--retention-time` expires.
+The table is capped to what fits the terminal window, but hidden rows retain their history. It shows state, continuous live time, check count (`CHK`), success streak (`STR`), rolling success rate, median latency, p95 latency, jitter, blocking criteria, and connection string. `BLOCKED BY` explains why a row is not yet stable: `alive`, `checks`, `rate`, `streak`, `latency`, `jitter`, or `failed`. A proxy that disappears from ProxyScrape continues to be checked until `--retention-time` expires.
 
 A successful check requires a duration below `--max-latency`. By default, any failed check resets continuous live time. Setting `--alive-failure-tolerance 1`, for example, preserves the original live-time counter through one isolated failure, although the proxy still becomes `DEGRADED` immediately.
 
