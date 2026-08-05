@@ -10,7 +10,14 @@ import curses
 import os
 import time
 
-from proxylib import check_proxy, connection_string, fetch_all_proxies
+from proxylib import (
+    check_proxy,
+    connection_string,
+    fetch_all_proxies,
+    positive_float,
+    sample_count,
+    worker_count,
+)
 
 # Lines render() prints before the first data row: status, controls, blank,
 # header, separator.
@@ -40,12 +47,20 @@ def enforce_capacity(tracked, limit):
     if len(tracked) <= limit:
         return False
     keep_keys = {
-        r["proxy"] for r in sorted(tracked.values(), key=lambda r: r["latency_ms"])[:limit]
+        r.key for r in sorted(tracked.values(), key=lambda r: r.latency_ms)[:limit]
     }
     for key in list(tracked.keys()):
         if key not in keep_keys:
             del tracked[key]
     return True
+
+
+def prune_stale(tracked, current_keys):
+    """Remove proxies no longer advertised by the latest source snapshot."""
+    stale_keys = set(tracked) - set(current_keys)
+    for key in stale_keys:
+        del tracked[key]
+    return bool(stale_keys)
 
 
 def safe_addnstr(stdscr, y, x, text, width, attr=0):
@@ -58,7 +73,7 @@ def safe_addnstr(stdscr, y, x, text, width, attr=0):
 
 def render(stdscr, tracked, cycle, checked_this_cycle, total_this_cycle, max_rows, max_latency, paused):
     enforce_capacity(tracked, max_rows)
-    rows = sorted(tracked.values(), key=lambda r: r["latency_ms"])
+    rows = sorted(tracked.values(), key=lambda r: r.latency_ms)
 
     height, width = stdscr.getmaxyx()
     stdscr.erase()
@@ -82,12 +97,12 @@ def render(stdscr, tracked, cycle, checked_this_cycle, total_this_cycle, max_row
         y = FIXED_HEADER_LINES + i
         if y >= height:
             break
-        conn = connection_string(r["protocol"], r["proxy"])
+        conn = connection_string(r.protocol, r.proxy)
         line = (
-            f"{r['latency_ms']:>6}ms  {r['protocol']:<8}  {r['country'][:20]:<20}  "
-            f"{r.get('checked_at', ''):<8}  {conn}"
+            f"{r.latency_ms:>6}ms  {r.protocol:<8}  {r.country[:20]:<20}  "
+            f"{r.checked_at:<8}  {conn}"
         )
-        safe_addnstr(stdscr, y, 0, line, width - 1, latency_color(r["latency_ms"], max_latency))
+        safe_addnstr(stdscr, y, 0, line, width - 1, latency_color(r.latency_ms, max_latency))
 
     stdscr.refresh()
 
@@ -107,6 +122,19 @@ def poll_keys(stdscr):
     return quit_requested, toggle_pause
 
 
+def wait_for_next_cycle(stdscr, seconds):
+    """Wait responsively between cycles; return (quit, pause-toggle parity)."""
+    deadline = time.monotonic() + seconds
+    toggle_pause = False
+    while time.monotonic() < deadline:
+        quit_requested, toggled = poll_keys(stdscr)
+        toggle_pause ^= toggled
+        if quit_requested:
+            return True, toggle_pause
+        time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+    return False, toggle_pause
+
+
 def run(stdscr, args):
     curses.curs_set(0)
     stdscr.nodelay(True)
@@ -116,7 +144,7 @@ def run(stdscr, args):
     curses.init_pair(COLOR_MEDIUM, curses.COLOR_YELLOW, -1)
     curses.init_pair(COLOR_SLOW, curses.COLOR_RED, -1)
 
-    tracked = {}  # ip:port -> latest result dict, for every currently-valid proxy
+    tracked = {}  # (protocol, ip:port) -> latest valid result
     cycle = 0
     paused = False
     max_rows = max_visible_rows(stdscr)
@@ -132,15 +160,22 @@ def run(stdscr, args):
 
             cycle += 1
             entries = fetch_all_proxies()  # silent — no console prints during curses mode
+            prune_stale(tracked, entries)
             total_this_cycle = len(entries)
             checked_this_cycle = 0
 
             if not entries:
+                if not paused:
+                    render(stdscr, tracked, cycle, 0, 0, max_rows, args.max_latency, paused)
+                should_quit, toggled = wait_for_next_cycle(stdscr, args.refresh_interval)
+                paused ^= toggled
+                if should_quit:
+                    break
                 continue
 
             executor = concurrent.futures.ThreadPoolExecutor(max_workers=args.workers)
             pending = {
-                executor.submit(check_proxy, protocol, proxy, args.timeout)
+                executor.submit(check_proxy, protocol, proxy, args.timeout, args.samples)
                 for protocol, proxy in entries
             }
             quit_requested = False
@@ -164,13 +199,13 @@ def run(stdscr, args):
                     for future in done:
                         result = future.result()
                         checked_this_cycle += 1
-                        result["checked_at"] = time.strftime("%H:%M:%S")
+                        result.checked_at = time.strftime("%H:%M:%S")
 
-                        key = result["proxy"]
-                        is_valid = result["ok"] and result["latency_ms"] < args.max_latency
+                        key = result.key
+                        is_valid = result.ok and result.latency_ms is not None and result.latency_ms < args.max_latency
 
                         if is_valid:
-                            if key not in tracked or tracked[key]["latency_ms"] != result["latency_ms"]:
+                            if key not in tracked or tracked[key].latency_ms != result.latency_ms:
                                 changed = True
                             tracked[key] = result
                         elif key in tracked:
@@ -195,6 +230,10 @@ def run(stdscr, args):
                     stdscr, tracked, cycle, checked_this_cycle, total_this_cycle,
                     max_rows, args.max_latency, paused,
                 )
+            should_quit, toggled = wait_for_next_cycle(stdscr, args.refresh_interval)
+            paused ^= toggled
+            if should_quit:
+                break
     except KeyboardInterrupt:
         pass
 
@@ -203,9 +242,11 @@ def main():
     parser = argparse.ArgumentParser(
         description="Live-monitor free proxies (http, socks4, socks5) from ProxyScrape."
     )
-    parser.add_argument("--timeout", type=float, default=5, help="Seconds to wait per proxy check")
-    parser.add_argument("--workers", type=int, default=50, help="Number of concurrent workers")
-    parser.add_argument("--max-latency", type=float, default=500, help="Only track proxies faster than this (ms)")
+    parser.add_argument("--timeout", type=positive_float, default=5, help="Seconds to wait per proxy check")
+    parser.add_argument("--workers", type=worker_count, default=50, help="Number of workers (1-100)")
+    parser.add_argument("--max-latency", type=positive_float, default=500, help="Only track proxies faster than this (ms)")
+    parser.add_argument("--samples", type=sample_count, default=1, help="Checks per proxy; median duration (1-5)")
+    parser.add_argument("--refresh-interval", type=positive_float, default=10, help="Seconds between scan cycles")
     args = parser.parse_args()
 
     try:

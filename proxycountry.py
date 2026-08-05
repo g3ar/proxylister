@@ -11,7 +11,15 @@ import concurrent.futures
 import os
 import sys
 
-from proxylib import check_proxy, fetch_all_proxies, summarize_by_country, fetch_available_countries
+from proxylib import (
+    check_proxy,
+    fetch_all_proxies,
+    fetch_available_countries,
+    positive_float,
+    sample_count,
+    summarize_by_country,
+    worker_count,
+)
 
 
 def print_progress_bar(done, total, valid_count, bar_width=40):
@@ -28,38 +36,17 @@ def print_summary(summary):
     print(f"\n{header}")
     print("-" * len(header))
     for entry in summary:
-        print(f"{entry['country'][:25]:<25}  {entry['count']:>5}  {entry['fastest_ms']}ms")
-
-
-def get_countries(entries, timeout=5):
-    """
-    Run a quick check on all proxies and return the set of countries
-    reported by successful checks.
-    """
-    countries = set()
-    total = len(entries)
-    done = 0
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(50, total)) as executor:
-        futures = [
-            executor.submit(check_proxy, protocol, proxy, timeout)
-            for protocol, proxy in entries
-        ]
-        for future in concurrent.futures.as_completed(futures):
-            result = future.result()
-            done += 1
-            if result["ok"]:
-                countries.add(result.get("country", "Unknown"))
-            print_progress_bar(done, total, len(countries))
-    return sorted(countries)
+        print(f"{entry.country[:25]:<25}  {entry.count:>5}  {entry.fastest_ms}ms")
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="Scan free proxies (http, socks4, socks5) and print a country breakdown of the valid ones."
     )
-    parser.add_argument("--timeout", type=float, default=5, help="Seconds to wait per proxy check")
-    parser.add_argument("--workers", type=int, default=50, help="Number of concurrent workers")
-    parser.add_argument("--max-latency", type=float, default=500, help="Only count proxies faster than this (ms)")
+    parser.add_argument("--timeout", type=positive_float, default=5, help="Seconds to wait per proxy check")
+    parser.add_argument("--workers", type=worker_count, default=50, help="Number of workers (1-100)")
+    parser.add_argument("--max-latency", type=positive_float, default=500, help="Only count proxies faster than this (ms)")
+    parser.add_argument("--samples", type=sample_count, default=1, help="Checks per proxy; median duration (1-5)")
     parser.add_argument(
         "--list-countries",
         action="store_true",
@@ -72,6 +59,12 @@ def main():
     )
     args = parser.parse_args()
 
+    if args.list_countries:
+        countries = fetch_available_countries(timeout=args.timeout)
+        for c in countries:
+            print(c)
+        return
+
     print("Fetching proxy lists from ProxyScrape (http, socks4, socks5)...")
     entries = fetch_all_proxies(verbose=args.verbose)
 
@@ -79,30 +72,23 @@ def main():
         print("No proxies found.")
         sys.exit(0)
 
-    if args.list_countries:
-        # Fast path – use the dedicated API call
-        countries = fetch_available_countries(timeout=args.timeout)
-        for c in countries:
-            print(c)
-        return
-
-    print(f"Fetched {len(entries)} proxies total. Checking availability with {min(args.workers, 50)} workers...")
+    print(f"Fetched {len(entries)} protocol/address pairs. Checking with {args.workers} workers...")
     print("(Press Ctrl+C at any time to stop early — the breakdown will use whatever was found so far.)")
 
     valid = []
     total = len(entries)
     done = 0
     interrupted = False
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=min(args.workers, 50))
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=args.workers)
     try:
         futures = [
-            executor.submit(check_proxy, protocol, proxy, args.timeout)
+            executor.submit(check_proxy, protocol, proxy, args.timeout, args.samples)
             for protocol, proxy in entries
         ]
         for future in concurrent.futures.as_completed(futures):
             result = future.result()
             done += 1
-            if result["ok"] and result["latency_ms"] < args.max_latency:
+            if result.ok and result.latency_ms is not None and result.latency_ms < args.max_latency:
                 valid.append(result)
             print_progress_bar(done, total, len(valid))
         print(f"\n\n{len(valid)}/{total} proxies are valid.")

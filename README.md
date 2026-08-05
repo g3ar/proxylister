@@ -1,15 +1,16 @@
 # Proxy Tools
 
-Two small CLI tools for working with free proxies from [ProxyScrape](https://proxyscrape.com/free-proxy-list), sharing a common library:
+Three small CLI tools for working with free proxies from [ProxyScrape](https://proxyscrape.com/free-proxy-list), sharing a common library:
 
-- **`proxylister.py`** — one-shot scan: fetch, check, geolocate, and save working proxies to a file. Optional Selenium validation against a real URL.
+- **`proxylister.py`** — one-shot scan: fetch, check, geolocate, and save working proxies to a file. Optional HTTP preflight and Selenium validation against a real URL.
 - **`proxymonitor.py`** — live dashboard: continuously re-scans and shows currently-working proxies in a color-coded terminal table. No file output.
-- **`proxylib.py`** — shared fetching/checking logic used by both. Not run directly.
+- **`proxycountry.py`** — country breakdown of valid proxies, plus a fast country-list mode.
+- **`proxylib.py`** — shared fetching/checking logic and typed result models. Not run directly.
 
 ## Requirements
 
-- Python 3.9+
-- `requests`, `requests[socks]` (PySocks, for `socks4`/`socks5` proxies)
+- Python 3.10+
+- `requests[socks]` (includes PySocks for `socks4`/`socks5` proxies)
 - `selenium>=4.10` and Google Chrome — only needed for `proxylister.py --check-url`. Selenium Manager (bundled since 4.6) auto-downloads a matching ChromeDriver, so no manual driver setup is needed.
 - `proxymonitor.py` uses the standard-library `curses` module. On Windows, install `windows-curses` first (`curses` isn't available there by default).
 
@@ -19,11 +20,11 @@ Two small CLI tools for working with free proxies from [ProxyScrape](https://pro
 python -m venv venv
 source venv/bin/activate  # on Windows: venv\Scripts\activate
 
-pip install requests requests[socks]
-pip install "selenium>=4.10"   # only if you'll use --check-url
+pip install -r requirements.txt
+pip install -r requirements-selenium.txt  # only if you'll use --check-url
 ```
 
-Keep `proxylib.py`, `proxylister.py`, and `proxymonitor.py` together in the same directory — the other two import from `proxylib.py`.
+Keep the four Python files together in the same directory — all three CLI tools import from `proxylib.py`.
 
 ## proxylister.py
 
@@ -40,8 +41,11 @@ python proxylister.py --timeout 5 --workers 50 --output working.txt --max-latenc
 | `--timeout` | Seconds to wait per proxy check | `5` |
 | `--workers` | Concurrent worker threads | `50` |
 | `--output` | Output file path | `working_proxies.txt` |
+| `--format` | Output format: `text`, JSON Lines (`json`), or `csv` | `text` |
 | `--max-latency` | Only keep proxies faster than this (ms) | `500` |
+| `--samples` | Checks per proxy; use their median duration (1–5) | `1` |
 | `--check-url` | URL to validate each fast proxy against via Selenium (see below) | disabled |
+| `--browser-workers` | Maximum concurrent Chrome instances | `1` |
 | `--headless` | Run `--check-url` checks without a visible browser window | off |
 
 Press **Ctrl+C** any time to stop early — only proxies already confirmed working (and Selenium-verified, if applicable) at that point get saved.
@@ -62,7 +66,7 @@ Example:
 
 ### `--check-url` (Selenium validation)
 
-The moment a proxy passes the latency filter, it's opened in Chrome through that proxy — no separate pass, this happens inline during the scan. A proxy is dropped if the page fails to load, if Chrome shows its own internal network-error page, or if the response itself is an HTTP error (e.g. a dead proxy returning its own `502`/`403` page instead of forwarding to the target). On success the window stays open 10 seconds (skipped in `--headless` mode) so you can visually confirm the page actually rendered, then moves to the next proxy. The Selenium page-load timeout is `2 × --max-latency` in seconds, floored at 10s.
+Fast proxies first receive a lightweight HTTP check against the target URL. Those that pass are sent to a separate browser-worker pool, so Chrome does not block collection of network-check results. A proxy is dropped if the page fails to load, Chrome shows an internal network-error page, or the main document has an HTTP error status. On success a visible window stays open for 10 seconds; headless mode skips that delay. The page-load timeout is `2 × --max-latency`, floored at 10s.
 
 ## proxymonitor.py
 
@@ -77,17 +81,36 @@ python proxymonitor.py --timeout 5 --workers 50 --max-latency 500
 | `--timeout` | Seconds to wait per proxy check | `5` |
 | `--workers` | Concurrent worker threads | `50` |
 | `--max-latency` | Only track proxies faster than this (ms) | `500` |
+| `--samples` | Checks per proxy; use their median duration (1–5) | `1` |
+| `--refresh-interval` | Delay between complete scan cycles (seconds) | `10` |
 
 **Controls:** `q` quits, `p` pauses/resumes the display (checks keep running in the background while paused).
 
-The table is capped to whatever fits the terminal window at startup (resizing afterward has no effect); if more proxies qualify than fit, the slowest ones are dropped first. A proxy that stops passing on a re-check is removed immediately.
+The table is capped to whatever fits the terminal window at startup (resizing afterward has no effect); if more proxies qualify than fit, the slowest ones are dropped first. A proxy that fails a check or disappears from the source list is removed.
+
+## proxycountry.py
+
+Print a country summary, or fetch only ProxyScrape's advertised country list without downloading and checking every proxy:
+
+```bash
+python proxycountry.py --timeout 5 --workers 50 --max-latency 500
+python proxycountry.py --list-countries
+```
+
+## Tests
+
+The standard-library test suite mocks all network access:
+
+```bash
+python -m unittest discover -v
+```
 
 ## Notes
 
 - Free proxies are short-lived and unreliable — expect a low success rate.
 - `ip-api.com`'s free tier is rate-limited to 45 requests/minute per source IP, but since each lookup goes out through a different proxy, this rarely matters.
 - Raise `--workers` for faster scans (more open connections), or `--timeout` on a slow connection.
-- `--check-url` is slow by nature (~10+ seconds per proxy, one browser at a time) — the more proxies pass `--max-latency`, the longer the run takes.
+- `--check-url` is slow by nature; raise `--browser-workers` carefully because each worker launches Chrome.
 - On a headless server, pair `--check-url` with `--headless`, or Chrome will fail to launch.
 
 ## License
