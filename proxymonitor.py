@@ -1,7 +1,27 @@
 #!/usr/bin/env python3
-"""
-Live curses dashboard of currently-working free proxies from ProxyScrape.
-See README.md for usage. Requires proxylib.py in the same directory.
+"""Continuously monitor working free proxies in a live terminal dashboard.
+
+Each cycle downloads a fresh HTTP, SOCKS4, and SOCKS5 list from ProxyScrape,
+checks every candidate concurrently, and displays proxies whose measured
+duration is below ``--max-latency``.  Rows include latency, protocol, exit
+country, last-check time, and a ready-to-use connection string.  Colors show
+relative speed: green is fastest, yellow is intermediate, and red is closest
+to the configured limit.
+
+The monitor removes proxies that fail a later check or disappear from the
+source list.  ``--refresh-interval`` controls the delay between complete scan
+cycles; ``--samples`` can take several measurements and use their median.
+Nothing is written to disk.
+
+Typical usage::
+
+    python proxymonitor.py --workers 50 --max-latency 500
+    python proxymonitor.py --samples 3 --refresh-interval 30
+
+Inside the dashboard, press ``p`` to pause or resume screen updates and ``q``
+to quit.  Checks continue while the display is paused.  A curses-capable
+terminal and ``proxylib.py`` in the same directory are required.  Run
+``python proxymonitor.py --help`` or see README.md for details.
 """
 
 import argparse
@@ -240,7 +260,8 @@ def run(stdscr, args):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Live-monitor free proxies (http, socks4, socks5) from ProxyScrape."
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--timeout", type=positive_float, default=5, help="Seconds to wait per proxy check")
     parser.add_argument("--workers", type=worker_count, default=50, help="Number of workers (1-100)")

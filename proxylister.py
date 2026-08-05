@@ -1,5 +1,27 @@
 #!/usr/bin/env python3
-"""Fetch, validate, geolocate, and optionally browser-check free proxies."""
+"""Run a one-shot scan and save usable free proxies to a file.
+
+The command downloads HTTP, SOCKS4, and SOCKS5 candidates from ProxyScrape,
+checks them concurrently through ``ip-api.com``, geolocates their exit IPs,
+filters them by ``--max-latency``, and sorts the survivors from fastest to
+slowest.  Results can be written as human-readable text, JSON Lines, or CSV.
+
+For stronger validation, ``--check-url`` first performs a cheap HTTP request
+through each fast proxy and then opens successful candidates in Chrome.  These
+browser checks run in a separate pool so they do not block the network scan.
+Selenium and Chrome are needed only for this optional mode; use ``--headless``
+on servers and control resource usage with ``--browser-workers``.
+
+Typical usage::
+
+    python proxylister.py --workers 50 --max-latency 500 --output working.txt
+    python proxylister.py --samples 3 --format json --output proxies.jsonl
+    python proxylister.py --check-url https://example.com --headless
+
+Press Ctrl+C to stop early and save results completed up to that point.  Run
+``python proxylister.py --help`` for every option and see README.md for output
+formats and installation instructions.
+"""
 
 from __future__ import annotations
 
@@ -155,7 +177,10 @@ def browser_check(result, args, page_load_timeout):
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(description="Fetch, validate, and geolocate free proxies.")
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--timeout", type=positive_float, default=5, help="Seconds per proxy check")
     parser.add_argument("--workers", type=worker_count, default=50, help="Network workers (1-100)")
     parser.add_argument("--output", default="working_proxies.txt", help="Output file")

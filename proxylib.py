@@ -1,4 +1,24 @@
-"""Shared fetching, validation, and result models for the proxy CLI tools."""
+"""Shared implementation used by every command-line tool in this project.
+
+This module talks to the ProxyScrape API, downloads the currently advertised
+HTTP, SOCKS4, and SOCKS5 endpoints, and keeps each protocol/address pair as a
+separate candidate.  It also checks candidates through ``ip-api.com``: one
+request confirms that the proxy works, measures its complete request duration,
+and returns the exit country's name and coordinates.
+
+The public helpers provide:
+
+* concurrent proxy-list retrieval and deterministic deduplication;
+* thread-local ``requests.Session`` reuse for worker threads;
+* proxy and target-URL checks;
+* typed ``ProxyResult`` and ``CountrySummary`` records;
+* country aggregation and reusable argparse validators.
+
+This is a library module, not a standalone program.  Keep it beside
+``proxylister.py``, ``proxymonitor.py``, and ``proxycountry.py`` and run one of
+those scripts instead.  Network access and ``requests[socks]`` are required.
+See README.md for installation and end-user examples.
+"""
 
 from __future__ import annotations
 

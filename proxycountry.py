@@ -1,9 +1,25 @@
 #!/usr/bin/env python3
-"""
-Scan free proxies from ProxyScrape and print a country breakdown of the
-valid ones (count + fastest latency per country), sorted fastest first.
-Also supports listing all available countries quickly via --list-countries.
-See README.md for usage. Requires proxylib.py in the same directory.
+"""Summarize currently working free proxies by exit country.
+
+In its normal mode, this command downloads HTTP, SOCKS4, and SOCKS5 candidates
+from ProxyScrape, checks them concurrently through ``ip-api.com``, applies the
+``--max-latency`` limit, and groups successful results by country.  The printed
+table contains each country's working-proxy count and fastest measured request
+duration, with countries ordered by that fastest result.
+
+``--list-countries`` is a separate fast mode.  It calls ProxyScrape's country
+endpoint directly and exits without downloading or testing individual proxies.
+Use it when you only need to learn which countries the provider advertises.
+
+Typical usage::
+
+    python proxycountry.py --workers 50 --max-latency 500
+    python proxycountry.py --samples 3 --verbose
+    python proxycountry.py --list-countries
+
+Press Ctrl+C during a scan to print a summary from results collected so far.
+The script requires network access and ``proxylib.py`` in the same directory.
+Run ``python proxycountry.py --help`` or see README.md for all options.
 """
 
 import argparse
@@ -41,7 +57,8 @@ def print_summary(summary):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Scan free proxies (http, socks4, socks5) and print a country breakdown of the valid ones."
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--timeout", type=positive_float, default=5, help="Seconds to wait per proxy check")
     parser.add_argument("--workers", type=worker_count, default=50, help="Number of workers (1-100)")
