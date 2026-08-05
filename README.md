@@ -70,10 +70,10 @@ Fast proxies first receive a lightweight HTTP check against the target URL. Thos
 
 ## proxymonitor.py
 
-Runs forever: each cycle re-fetches a fresh proxy list, checks it, and updates a live curses table of every currently-valid proxy (latency, protocol, country, last-checked time, connection string), color-coded green/yellow/red by how close it is to `--max-latency`. Nothing is written to disk.
+Runs forever and keeps a rolling check history for each proxy. New candidates start in `PROBATION`, become `STABLE` only after satisfying every configured time and quality threshold, and change to `DEGRADED` after a failure. Green, yellow, and red rows represent those states. Nothing is written to disk.
 
 ```bash
-python proxymonitor.py --timeout 5 --workers 50 --max-latency 500
+python proxymonitor.py --timeout 5 --workers 50 --max-latency 500 --min-alive-time 60
 ```
 
 | Flag | Description | Default |
@@ -83,10 +83,21 @@ python proxymonitor.py --timeout 5 --workers 50 --max-latency 500
 | `--max-latency` | Only track proxies faster than this (ms) | `500` |
 | `--samples` | Checks per proxy; use their median duration (1–5) | `1` |
 | `--refresh-interval` | Delay between complete scan cycles (seconds) | `10` |
+| `--history-size` | Recent check results retained per proxy | `10` |
+| `--min-checks` | Checks required before a proxy can become stable | `5` |
+| `--min-success-rate` | Required success ratio from `0` to `1` | `0.8` |
+| `--min-success-streak` | Consecutive successful checks required | `3` |
+| `--min-alive-time` | Required continuous live time in seconds | `60` |
+| `--max-jitter` | Maximum latency standard deviation in ms | `150` |
+| `--alive-failure-tolerance` | Failures allowed before continuous live time resets | `0` |
+| `--retention-time` | Continue tracking proxies absent from ProxyScrape for this many seconds | `1800` |
+| `--stable-only` | Hide probation and degraded proxies | off |
 
 **Controls:** `q` quits, `p` pauses/resumes the display (checks keep running in the background while paused).
 
-The table is capped to whatever fits the terminal window at startup (resizing afterward has no effect); if more proxies qualify than fit, the slowest ones are dropped first. A proxy that fails a check or disappears from the source list is removed.
+The table is capped to what fits the terminal window, but hidden rows retain their history. It shows state, continuous live time, rolling success rate, median latency, p95 latency, jitter, country, and connection string. A proxy that disappears from ProxyScrape continues to be checked until `--retention-time` expires.
+
+A successful check requires a duration below `--max-latency`. By default, any failed check resets continuous live time. Setting `--alive-failure-tolerance 1`, for example, preserves the original live-time counter through one isolated failure, although the proxy still becomes `DEGRADED` immediately.
 
 ## proxycountry.py
 
