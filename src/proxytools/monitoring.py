@@ -33,6 +33,7 @@ class MonitorRow:
     first_seen_at: float | None = None
     total_observed_uptime: float = 0
     last_failure_at: float | None = None
+    last_checked_at: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +109,7 @@ class MonitorEngine:
                     first_seen_at=history.first_seen_at,
                     total_observed_uptime=history.total_observed_uptime,
                     last_failure_at=history.last_failure_at,
+                    last_checked_at=history.samples[-1].checked_at if history.samples else None,
                 )
             )
         state_order = {"STABLE": 0, "PROBATION": 1, "DEGRADED": 2}

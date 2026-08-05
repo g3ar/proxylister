@@ -87,6 +87,8 @@ class ProxyMonitorApp(App):
         self.latest_snapshot: MonitorSnapshot | None = None
         self.pending_snapshot: MonitorSnapshot | None = None
         self.rows_by_key: dict[str, MonitorRow] = {}
+        self.cells_by_key: dict[str, tuple] = {}
+        self.completed_cycle = 0
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -118,6 +120,12 @@ class ProxyMonitorApp(App):
         if self.paused:
             self.pending_snapshot = snapshot
             return
+        # Waiting snapshots only change the countdown and elapsed wall clock.
+        # Rewriting thousands of table cells once a second starves keyboard
+        # events, so keep the table frozen until a proxy is checked again.
+        if snapshot.phase == "waiting" and self.completed_cycle == snapshot.cycle:
+            self._render_status(snapshot, len(self.rows_by_key))
+            return
         self.render_snapshot(snapshot)
 
     def render_snapshot(self, snapshot: MonitorSnapshot):
@@ -127,23 +135,34 @@ class ProxyMonitorApp(App):
             selected_key = str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
         rows = self.filtered_rows(snapshot)
         next_rows = {f"{row.key[0]}|{row.key[1]}": row for row in rows}
-        rows_added = False
         for removed_key in self.rows_by_key.keys() - next_rows.keys():
             table.remove_row(removed_key)
+            self.cells_by_key.pop(removed_key, None)
         for row in rows:
             key = f"{row.key[0]}|{row.key[1]}"
             cells = self._row_cells(row)
             if key in self.rows_by_key:
-                for (_, column_key), value in zip(self.COLUMNS, cells):
-                    table.update_cell(key, column_key, value, update_width=True)
+                # A new completed check is the authoritative signal that this
+                # row changed. Avoid scanning/updating every cell merely because
+                # its computed Alive duration advanced between snapshots.
+                old_row = self.rows_by_key[key]
+                if row.last_checked_at != old_row.last_checked_at or (
+                    row.last_checked_at is None and row != old_row
+                ):
+                    previous_cells = self.cells_by_key.get(key, ())
+                    for index, ((_, column_key), value) in enumerate(zip(self.COLUMNS, cells)):
+                        if index >= len(previous_cells) or value != previous_cells[index]:
+                            table.update_cell(key, column_key, value, update_width=False)
+                    self.cells_by_key[key] = cells
             else:
                 table.add_row(*cells, key=key)
-                rows_added = True
+                self.cells_by_key[key] = cells
         self.rows_by_key = next_rows
-        cycle_complete = snapshot.phase != "checking" or snapshot.checked == snapshot.total
-        if rows_added or cycle_complete:
+        cycle_complete = snapshot.checked == snapshot.total and snapshot.phase in {"checking", "waiting"}
+        if cycle_complete:
             table.sort("median", key=self._latency_sort_key)
-            if cycle_complete and selected_key in self.rows_by_key:
+            self.completed_cycle = snapshot.cycle
+            if selected_key in self.rows_by_key:
                 table.move_cursor(row=table.get_row_index(selected_key), animate=False)
         self._render_status(snapshot, len(rows))
         if rows:
