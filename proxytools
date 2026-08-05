@@ -60,7 +60,7 @@ fi
 
 BASE_STAMP="$VENV_DIR/.proxytools-requirements"
 if ! cmp -s "$PROJECT_DIR/requirements.txt" "$BASE_STAMP" 2>/dev/null || \
-   ! "$VENV_DIR/bin/python" -c 'import requests, socks, selenium' >/dev/null 2>&1; then
+   ! "$VENV_DIR/bin/python" -c 'import requests, rich, selenium, socks, textual' >/dev/null 2>&1; then
     printf 'Installing dependencies ...\n' >&2
     "$VENV_DIR/bin/python" -m pip install -r "$PROJECT_DIR/requirements.txt"
     cp "$PROJECT_DIR/requirements.txt" "$BASE_STAMP"

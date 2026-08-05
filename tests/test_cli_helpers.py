@@ -6,7 +6,7 @@ import unittest
 
 from proxytools.commands.scan import web_url
 from proxytools.models import ProxyResult
-from proxytools.output.dashboard import display_rows, format_duration
+from proxytools.output.dashboard import format_duration
 from proxytools.output.serializers import filter_and_sort, write_results
 from proxytools.stability import ProxyHistory, StabilityConfig, StabilityPolicy
 from proxytools.stability.history import expire_histories, update_advertised
@@ -101,14 +101,7 @@ class CliHelperTests(unittest.TestCase):
         history.record(ProxyResult("http", self.fast.proxy, False), 120, policy)
         self.assertIsNone(history.alive_since)
 
-    def test_stable_only_and_duration_format(self):
-        stable = ProxyHistory("http", "a:1", 10)
-        stable.latest = ProxyResult("http", "a:1", True, 100)
-        stable.state = "STABLE"
-        probation = ProxyHistory("http", "b:2", 10)
-        probation.latest = ProxyResult("http", "b:2", True, 100)
-        rows = display_rows({stable.key: stable, probation.key: probation}, stable_only=True)
-        self.assertEqual(rows, [stable])
+    def test_duration_format(self):
         self.assertEqual(format_duration(65), "01:05")
         self.assertEqual(format_duration(299.9), "04:59")
 

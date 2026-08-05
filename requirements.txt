@@ -1,2 +1,4 @@
 requests[socks]
 selenium>=4.10
+rich>=14
+textual>=1.0

@@ -1,28 +1,16 @@
-"""Curses rendering and keyboard handling for the stability monitor."""
+"""Interactive Textual dashboard for proxy stability monitoring."""
 
 from __future__ import annotations
 
-import curses
-import math
-import time
+import threading
 
-from proxytools.checking import connection_string
-from proxytools.stability import StabilityPolicy
+from rich.text import Text
+from textual import work
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.widgets import DataTable, Footer, Header, Static
 
-FIXED_HEADER_LINES = 5
-COLOR_STABLE = 1
-COLOR_PROBATION = 2
-COLOR_DEGRADED = 3
-
-
-def configure_screen(stdscr):
-    curses.curs_set(0)
-    stdscr.nodelay(True)
-    curses.start_color()
-    curses.use_default_colors()
-    curses.init_pair(COLOR_STABLE, curses.COLOR_GREEN, -1)
-    curses.init_pair(COLOR_PROBATION, curses.COLOR_YELLOW, -1)
-    curses.init_pair(COLOR_DEGRADED, curses.COLOR_RED, -1)
+from proxytools.monitoring import MonitorEngine, MonitorRow, MonitorSnapshot
 
 
 def format_duration(seconds: float) -> str:
@@ -32,96 +20,186 @@ def format_duration(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:02d}:{secs:02d}"
 
 
-def display_rows(histories, stable_only=False):
-    rows = [item for item in histories.values() if item.latest is not None]
-    if stable_only:
-        rows = [item for item in rows if item.state == "STABLE"]
-    state_order = {"STABLE": 0, "PROBATION": 1, "DEGRADED": 2}
-    return sorted(
-        rows,
-        key=lambda item: (
-            state_order[item.state],
-            -item.success_rate,
-            item.p95_latency if item.p95_latency is not None else math.inf,
-            item.jitter,
-        ),
-    )
+class ProxyMonitorApp(App):
+    """Full-screen, keyboard-driven proxy monitor."""
 
+    TITLE = "Proxy Tools"
+    SUB_TITLE = "Stable proxy monitor"
+    CSS = """
+    Screen {
+        layout: vertical;
+    }
+    #status {
+        height: 3;
+        padding: 0 1;
+        content-align: left middle;
+        background: $panel;
+    }
+    #table {
+        height: 1fr;
+    }
+    #details {
+        height: 8;
+        padding: 1 2;
+        border-top: solid $primary;
+        background: $surface;
+    }
+    .paused {
+        background: $warning-darken-2;
+    }
+    """
+    BINDINGS = [
+        Binding("q", "quit", "Quit"),
+        Binding("p", "pause", "Pause"),
+        Binding("s", "stable_only", "Stable only"),
+        Binding("r", "refresh", "Refresh"),
+    ]
 
-def safe_addnstr(stdscr, y, x, text, width, attr=0):
-    try:
-        stdscr.addnstr(y, x, text, width, attr)
-    except curses.error:
-        pass
+    def __init__(self, engine: MonitorEngine, *, stable_only=False, autostart=True):
+        super().__init__()
+        self.engine = engine
+        self.stable_only = stable_only
+        self.autostart = autostart
+        self.paused = False
+        self.stop_event = threading.Event()
+        self.latest_snapshot: MonitorSnapshot | None = None
+        self.pending_snapshot: MonitorSnapshot | None = None
+        self.rows_by_key: dict[str, MonitorRow] = {}
 
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=True)
+        yield Static("Starting monitor…", id="status")
+        yield DataTable(id="table", cursor_type="row", zebra_stripes=True)
+        yield Static("Select a proxy to see stability details.", id="details")
+        yield Footer()
 
-def max_visible_rows(stdscr):
-    height, _ = stdscr.getmaxyx()
-    return max(height - FIXED_HEADER_LINES - 1, 1)
-
-
-def state_color(state):
-    colors = {"STABLE": COLOR_STABLE, "PROBATION": COLOR_PROBATION, "DEGRADED": COLOR_DEGRADED}
-    return curses.color_pair(colors[state])
-
-
-def render(stdscr, histories, cycle, checked, total, max_rows, paused, stable_only, policy: StabilityPolicy):
-    now = time.monotonic()
-    rows = display_rows(histories, stable_only)[:max_rows]
-    stable_count = sum(item.state == "STABLE" for item in histories.values())
-    height, width = stdscr.getmaxyx()
-    stdscr.erase()
-    status = f"proxytools monitor — cycle {cycle}, checked {checked}/{total}, {stable_count} stable, {len(histories)} tracked"
-    if paused:
-        status += "  [PAUSED]"
-    safe_addnstr(stdscr, 0, 0, status, width - 1, curses.A_BOLD | (curses.A_REVERSE if paused else 0))
-    safe_addnstr(stdscr, 1, 0, "q: quit   p: pause/resume", width - 1, curses.A_DIM)
-    header = (
-        f"{'STATE':<9} {'ALIVE':>8} {'CHK':>5} {'STR':>3} {'OK':>4} "
-        f"{'MED':>6} {'P95':>6} {'JIT':>5} {'COUNTRY':<12} {'BLOCKED BY':<18} CONNECTION"
-    )
-    safe_addnstr(stdscr, 3, 0, header, width - 1, curses.A_UNDERLINE)
-    for index, item in enumerate(rows):
-        y = FIXED_HEADER_LINES + index
-        if y >= height:
-            break
-        latest = item.latest
-        ratio = f"{round(item.success_rate * 100):>3}%"
-        median = f"{item.median_latency}ms" if item.median_latency is not None else "-"
-        p95 = f"{item.p95_latency}ms" if item.p95_latency is not None else "-"
-        checks = f"{len(item.samples)}/{policy.config.min_checks}"
-        blocked_by = ",".join(policy.blockers(item, now)) or "-"
-        line = (
-            f"{item.state:<9} {format_duration(item.alive_for(now)):>8} {checks:>5} "
-            f"{item.consecutive_successes:>3} {ratio:>4} {median:>6} {p95:>6} "
-            f"{item.jitter:>3}ms {latest.country[:12]:<12} {blocked_by:<18} "
-            f"{connection_string(item.protocol, item.proxy)}"
+    def on_mount(self):
+        table = self.query_one("#table", DataTable)
+        table.add_columns(
+            "State", "Alive", "Checks", "Streak", "OK", "Median",
+            "P95", "Jitter", "Country", "Blocked by", "Connection",
         )
-        safe_addnstr(stdscr, y, 0, line, width - 1, state_color(item.state))
-    stdscr.refresh()
+        if self.autostart:
+            self.monitor_worker()
 
+    def on_unmount(self):
+        self.stop_event.set()
+        self.engine.request_refresh()
 
-def poll_keys(stdscr):
-    quit_requested = False
-    toggle_pause = False
-    while True:
-        ch = stdscr.getch()
-        if ch == -1:
-            break
-        if ch in (ord("q"), ord("Q")):
-            quit_requested = True
-        elif ch in (ord("p"), ord("P")):
-            toggle_pause = not toggle_pause
-    return quit_requested, toggle_pause
+    @work(thread=True, exclusive=True, group="monitor")
+    def monitor_worker(self):
+        self.engine.run(
+            self.stop_event,
+            lambda snapshot: self.call_from_thread(self.receive_snapshot, snapshot),
+        )
 
+    def receive_snapshot(self, snapshot: MonitorSnapshot):
+        self.latest_snapshot = snapshot
+        if self.paused:
+            self.pending_snapshot = snapshot
+            return
+        self.render_snapshot(snapshot)
 
-def wait_for_next_cycle(stdscr, seconds):
-    deadline = time.monotonic() + seconds
-    toggle_pause = False
-    while time.monotonic() < deadline:
-        quit_requested, toggled = poll_keys(stdscr)
-        toggle_pause ^= toggled
-        if quit_requested:
-            return True, toggle_pause
-        time.sleep(min(0.1, max(0, deadline - time.monotonic())))
-    return False, toggle_pause
+    def render_snapshot(self, snapshot: MonitorSnapshot):
+        table = self.query_one("#table", DataTable)
+        selected_key = None
+        if table.row_count:
+            try:
+                selected_key = str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
+            except Exception:
+                pass
+        table.clear()
+        self.rows_by_key.clear()
+        rows = [row for row in snapshot.rows if not self.stable_only or row.state == "STABLE"]
+        for row in rows:
+            key = f"{row.key[0]}|{row.key[1]}"
+            self.rows_by_key[key] = row
+            table.add_row(
+                self._state_text(row.state),
+                format_duration(row.alive_seconds),
+                f"{row.checks}/{row.required_checks}",
+                str(row.streak),
+                f"{row.success_rate:.0%}",
+                self._milliseconds(row.median_latency),
+                self._milliseconds(row.p95_latency),
+                f"{row.jitter}ms",
+                row.country,
+                ",".join(row.blockers) or "-",
+                row.connection,
+                key=key,
+            )
+        if selected_key in self.rows_by_key:
+            table.move_cursor(row=table.get_row_index(selected_key), animate=False)
+        self._render_status(snapshot, len(rows))
+        if rows:
+            current_key = str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
+            self._render_details(self.rows_by_key.get(current_key, rows[0]))
+        else:
+            self.query_one("#details", Static).update("No proxies match the current filter.")
+
+    def _render_status(self, snapshot: MonitorSnapshot, visible: int):
+        phase = {
+            "fetching": "Fetching ProxyScrape lists…",
+            "checking": f"Checking {snapshot.checked}/{snapshot.total}",
+            "waiting": f"Next cycle in {snapshot.next_cycle_in}s",
+        }.get(snapshot.phase, snapshot.phase.title())
+        filters = "stable only" if self.stable_only else "all states"
+        text = (
+            f"Cycle {snapshot.cycle} │ {phase} │ {snapshot.stable_count} stable │ "
+            f"{snapshot.tracked_count} tracked │ {visible} visible │ {filters}"
+        )
+        if self.paused:
+            text += " │ PAUSED (checks continue)"
+        status = self.query_one("#status", Static)
+        status.update(text)
+        status.set_class(self.paused, "paused")
+
+    def _render_details(self, row: MonitorRow):
+        blocked = ", ".join(row.blockers) or "none"
+        detail = Text.from_markup(
+            f"[bold]{row.connection}[/bold]  [{self._state_color(row.state)}]{row.state}[/]\n"
+            f"Country: {row.country}    Alive: {format_duration(row.alive_seconds)}    "
+            f"Checks: {row.checks}/{row.required_checks}    Streak: {row.streak}    Success: {row.success_rate:.1%}\n"
+            f"Median: {self._milliseconds(row.median_latency)}    P95: {self._milliseconds(row.p95_latency)}    "
+            f"Jitter: {row.jitter}ms    Blocked by: {blocked}"
+        )
+        self.query_one("#details", Static).update(detail)
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted):
+        row = self.rows_by_key.get(str(event.row_key.value))
+        if row is not None:
+            self._render_details(row)
+
+    def action_pause(self):
+        self.paused = not self.paused
+        if not self.paused and self.pending_snapshot is not None:
+            snapshot, self.pending_snapshot = self.pending_snapshot, None
+            self.render_snapshot(snapshot)
+        elif self.latest_snapshot is not None:
+            self._render_status(self.latest_snapshot, len(self.rows_by_key))
+
+    def action_stable_only(self):
+        self.stable_only = not self.stable_only
+        if self.latest_snapshot is not None:
+            self.render_snapshot(self.latest_snapshot)
+
+    def action_refresh(self):
+        self.engine.request_refresh()
+        self.notify("Refresh requested")
+
+    def action_quit(self):
+        self.stop_event.set()
+        self.engine.request_refresh()
+        self.exit()
+
+    @staticmethod
+    def _milliseconds(value):
+        return f"{value}ms" if value is not None else "-"
+
+    @staticmethod
+    def _state_color(state):
+        return {"STABLE": "green", "PROBATION": "yellow", "DEGRADED": "red"}[state]
+
+    @classmethod
+    def _state_text(cls, state):
+        return Text(state, style=cls._state_color(state))

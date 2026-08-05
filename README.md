@@ -11,7 +11,8 @@
 - Python 3.10+
 - `requests[socks]` (includes PySocks for `socks4`/`socks5` proxies)
 - `selenium>=4.10` is installed with the base dependencies but used only by `scan --check-url`. Google Chrome is required for that mode; Selenium Manager downloads a matching ChromeDriver automatically.
-- `monitor` uses the standard-library `curses` module. On Windows, install `windows-curses` first.
+- Rich provides progress and status output for non-interactive commands.
+- Textual provides the interactive `monitor` dashboard.
 
 ## Installation
 
@@ -100,9 +101,9 @@ Runs forever and keeps a rolling check history for each proxy. New candidates st
 | `--retention-time` | Continue tracking proxies absent from ProxyScrape for this many seconds | `1800` |
 | `--stable-only` | Hide probation and degraded proxies | off |
 
-**Controls:** `q` quits, `p` pauses/resumes the display (checks keep running in the background while paused).
+**Controls:** arrow keys select and scroll rows, `q` quits, `p` pauses/resumes display updates (checks continue), `s` toggles stable-only mode, and `r` requests the next scan immediately. Textual's footer always shows the active bindings.
 
-The table is capped to what fits the terminal window, but hidden rows retain their history. It shows state, continuous live time, check count (`CHK`), success streak (`STR`), rolling success rate, median latency, p95 latency, jitter, blocking criteria, and connection string. `BLOCKED BY` explains why a row is not yet stable: `alive`, `checks`, `rate`, `streak`, `latency`, `jitter`, or `failed`. A proxy that disappears from ProxyScrape continues to be checked until `--retention-time` expires.
+The Textual table is scrollable, supports row selection, and updates a detail panel for the highlighted proxy. It shows state, continuous live time, check count, success streak, rolling success rate, median latency, p95 latency, jitter, blocking criteria, and connection string. `Blocked by` explains why a row is not yet stable: `alive`, `checks`, `rate`, `streak`, `latency`, `jitter`, or `failed`. A status bar reports the current phase, cycle progress, tracked/stable counts, active filter, and countdown to the next cycle. A proxy that disappears from ProxyScrape continues to be checked until `--retention-time` expires.
 
 A successful check requires a duration below `--max-latency`. By default, any failed check resets continuous live time. Setting `--alive-failure-tolerance 1`, for example, preserves the original live-time counter through one isolated failure, although the proxy still becomes `DEGRADED` immediately.
 
@@ -136,8 +137,9 @@ src/proxytools/
   commands/                scan, monitor, and countries orchestration
   sources/                 ProxyScrape API adapter
   checking/                HTTP and optional browser validation
+  monitoring.py            UI-independent engine and immutable snapshots
   stability/               rolling history and stability policy
-  output/                  serializers and curses dashboard
+  output/                  Rich console output, serializers, and Textual dashboard
   models.py                shared domain records
   config.py                shared CLI value validation
 tests/                     isolated unit tests with mocked network access
