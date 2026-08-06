@@ -110,6 +110,62 @@ detailed counters, and other proxy analytics are available through `Enter`;
 the monitor has no separate debug mode. Candidates without measured latency
 remain in backend queues but must not appear in the table.
 
+## TUI interaction and visual contract
+
+The monitor is a user-facing terminal application, not a developer dashboard.
+Keyboard and mouse are equal control paths and must expose the same core
+workflow without making either path awkward. Prefer direct, predictable
+interaction over framework defaults, hidden state changes, animation, or
+decorative complexity.
+
+Preserve these interaction invariants:
+
+- selection is optional and the monitor starts with no proxy selected;
+- snapshots, filtering, and background resorts never create selection or
+  restore a previously released proxy key;
+- without selection, the viewport belongs to the user and background updates
+  must not scroll it;
+- a click anywhere across a proxy's complete visual row selects it;
+- clicking another row moves selection, clicking the selected row again clears
+  it, and double-clicking a row performs the same details action as `Enter`;
+- `Esc` clears table selection without moving the viewport;
+- clicks on empty table space or outside the table clear selection; outside
+  clicks continue to the control that received them instead of being consumed;
+- `Enter`, `b`, and `y` act only on an explicitly selected proxy;
+- `b` captures the selected proxy, releases selection, preserves the viewport,
+  and then opens the browser so background monitoring cannot drag the table
+  while the terminal is covered;
+- proxy details close with `Enter`, `Esc`, or a click on their shaded backdrop;
+  clicks inside the modal do not close it or reach the table;
+- mouse hitboxes follow visible components and rows, not merely rendered text;
+- mouse interaction must not add delays, timers, double scrolling, or hover-led
+  state changes;
+- the footer is one responsive row of indivisible
+  `<hotkey> <description>` blocks distributed across the terminal width;
+  essential actions survive narrow layouts while secondary hints disappear;
+- live updates must not block the event loop, steal focus, move selection, or
+  make keyboard and mouse input lag;
+- each UI bug fix gets a regression test for the complete user interaction,
+  including selection and viewport effects where relevant.
+
+Use these established terminal applications as design references. Borrow the
+specific quality listed here, not their entire layout or command model:
+
+| Reference | Use as guidance for | Do not copy |
+|-----------|---------------------|-------------|
+| `mc` | Full-width hotkey footer, clear modals, generous hitboxes, discoverability | Two-pane file-manager structure |
+| `htop` | Compact live tables, keyboard/mouse parity, updates that respect navigation | Excess permanent counters |
+| `less` | User-owned viewport and a normal no-selection state | Its command language |
+| `tig` | Dense list/details workflow and returning without losing list context | Git-specific hierarchy |
+| `vim` | Predictable navigation, explicit focus, and `Esc` as a safe neutral action | Modal editing and complex key grammar |
+| `btop` | Cohesive styling, spacing, visual hierarchy, responsive live layout, and useful mouse targets | Decorative graphs, animation, or information overload without a concrete need |
+
+Standard Textual widgets are implementation tools, not visual or interaction
+requirements. In particular, do not fall back to the stock Textual footer,
+web-style hover effects, automatic selection, gratuitous notifications,
+input-delaying animation, or IDE-like multi-pane complexity. Do not imitate
+any reference pixel for pixel; keep Proxy Tools compact and task-specific.
+
 ## Architecture
 
 The package uses a `src/` layout:
