@@ -1,0 +1,145 @@
+"""Find usable free proxies once and print them to standard output.
+
+Candidates are fetched from ProxyScrape, checked and geolocated concurrently,
+filtered by latency, and printed fastest-first. ``--url`` adds
+the same lightweight target check used by monitor; ``--browser-check`` adds an
+explicit Chrome/Selenium validation after that check.
+
+Examples::
+
+    ./proxytools list --max-latency 500
+    ./proxytools list --url https://example.com
+    ./proxytools list --url https://example.com --browser-check --headless
+"""
+
+from __future__ import annotations
+
+import argparse
+import concurrent.futures
+import os
+import sys
+
+from proxytools.checking import check_proxy, check_url, connection_string, probe_https_route
+from proxytools.checking.browser import MIN_PAGE_LOAD_TIMEOUT, browser_check
+from proxytools.config import load_config, positive_float, web_url
+from proxytools.models import ProxyResult
+from proxytools.output.console import console, progress_display
+from proxytools.output.serializers import filter_and_sort, format_result
+from proxytools.sources.proxyscrape import fetch_all_proxies
+
+
+def build_parser(prog="proxytools list", settings=None):
+    settings = settings or load_config()
+    parser = argparse.ArgumentParser(prog=prog, description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--debug", action="store_true", help="Print detailed proxy metadata")
+    parser.add_argument("--url", type=web_url, default=settings.url, help="URL every proxy must reach")
+    parser.add_argument(
+        "--max-latency", type=positive_float, default=settings.max_latency,
+        help=f"Maximum median latency in ms (config: {settings.max_latency:g})",
+    )
+    target = parser.add_argument_group("target validation")
+    target.add_argument(
+        "--browser-check", action="store_true",
+        help="Additionally validate --url in one Selenium browser",
+    )
+    target.add_argument("--headless", action="store_true", help="Run the Selenium browser headlessly")
+    return parser
+
+
+def validate_args(parser, args):
+    if args.browser_check and not args.url:
+        parser.error("--browser-check requires --url")
+    if args.headless and not args.browser_check:
+        parser.error("--headless requires --browser-check")
+
+
+def check_candidate(protocol, proxy, timeout, samples, url):
+    """Run browser-like identity and optional target checks without Selenium."""
+    result = check_proxy(protocol, proxy, timeout, samples)
+    if result.ok and not probe_https_route(result, timeout):
+        result.ok = False
+        result.failure_reason = "https"
+    elif result.ok and url and not check_url(
+        result, url, timeout, accept_forbidden=True
+    ):
+        result.ok = False
+        result.failure_reason = "url"
+    return result
+
+
+def main(argv=None):
+    settings = load_config()
+    parser = build_parser(settings=settings)
+    args = parser.parse_args(argv)
+    validate_args(parser, args)
+    page_timeout = max((args.max_latency * 2) / 1000.0, MIN_PAGE_LOAD_TIMEOUT)
+    console.print("[bold]Fetching proxy lists from ProxyScrape[/bold] (http, socks4, socks5)…")
+    entries = fetch_all_proxies(verbose=True)
+    if not entries:
+        console.print("[yellow]No proxies found.[/yellow]")
+        return 0
+
+    console.print(f"Fetched [bold]{len(entries)}[/bold] protocol/address pairs; using {settings.workers} workers.")
+    working: list[ProxyResult] = []
+    valid: list[ProxyResult] = []
+    verified: list[ProxyResult] = []
+    browser_futures = set()
+    interrupted = False
+    network_pool = concurrent.futures.ThreadPoolExecutor(max_workers=settings.workers)
+    browser_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1) if args.browser_check else None
+    try:
+        futures = [
+            network_pool.submit(
+                check_candidate, protocol, proxy, settings.timeout, settings.samples, args.url
+            )
+            for protocol, proxy in entries
+        ]
+        with progress_display() as progress:
+            task = progress.add_task("Checking proxies", total=len(entries), status="starting")
+            for future in concurrent.futures.as_completed(futures):
+                result = future.result()
+                if result.ok:
+                    working.append(result)
+                    if result.latency_ms is not None and result.latency_ms < args.max_latency:
+                        valid.append(result)
+                        if browser_pool:
+                            browser_futures.add(
+                                browser_pool.submit(browser_check, result, args.url, page_timeout, args.headless)
+                            )
+                completed = {item for item in browser_futures if item.done()}
+                for item in completed:
+                    browser_futures.remove(item)
+                    checked = item.result()
+                    if checked:
+                        verified.append(checked)
+                status = f"{len(working)} working, {len(valid)} valid"
+                if args.browser_check:
+                    status += f", {len(verified)} browser verified"
+                progress.update(task, advance=1, status=status)
+        if browser_futures:
+            console.print(f"Waiting for [bold]{len(browser_futures)}[/bold] browser checks…")
+            verified.extend(filter(None, (item.result() for item in concurrent.futures.as_completed(browser_futures))))
+        console.print(f"[bold green]{len(working)}[/bold green]/{len(entries)} proxies are working.")
+    except KeyboardInterrupt:
+        interrupted = True
+        console.print(f"[yellow]Interrupted — saving {len(working)} completed results.[/yellow]")
+    except RuntimeError as exc:
+        interrupted = True
+        console.print(f"[bold red]Error:[/bold red] {exc}", stderr=True)
+    finally:
+        network_pool.shutdown(wait=not interrupted, cancel_futures=True)
+        if browser_pool:
+            browser_pool.shutdown(wait=not interrupted, cancel_futures=True)
+
+    selected = filter_and_sort(verified if args.browser_check else valid, args.max_latency)
+    qualifier = "browser-verified" if args.browser_check else f"faster than {args.max_latency:g}ms"
+    console.print(f"Found [bold]{len(selected)}[/bold] {qualifier} proxies.")
+    for result in selected:
+        print(
+            format_result(result) if args.debug else connection_string(result.protocol, result.proxy),
+            file=sys.stdout,
+        )
+    if interrupted:
+        sys.stdout.flush()
+        os._exit(0)
+    return 0

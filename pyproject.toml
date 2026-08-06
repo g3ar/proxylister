@@ -9,7 +9,7 @@ description = "CLI tools for discovering and monitoring public proxies"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
-dependencies = ["requests[socks]", "selenium>=4.10", "rich>=14", "textual>=1.0"]
+dependencies = ["maxminddb>=2.6", "requests[socks]", "selenium>=4.10", "rich>=14", "textual>=1.0"]
 
 [project.scripts]
 proxytools = "proxytools.cli:main"

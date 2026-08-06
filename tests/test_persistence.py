@@ -133,9 +133,9 @@ class ProcessLockTests(unittest.TestCase):
             path = Path(directory) / "proxytools.lock"
             with ProcessLock("monitor", path):
                 with self.assertRaises(AlreadyRunning):
-                    with ProcessLock("scan", path):
+                    with ProcessLock("list", path):
                         pass
-            with ProcessLock("scan", path):
+            with ProcessLock("list", path):
                 pass
 
 

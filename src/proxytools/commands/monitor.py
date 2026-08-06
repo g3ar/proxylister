@@ -15,21 +15,16 @@ Keyboard controls::
 
 Examples::
 
-    ./proxytools monitor --min-alive-time 60 --refresh-interval 10
-    ./proxytools monitor --min-success-rate 0.9 --max-jitter 100 --stable-only
+    ./proxytools monitor
+    ./proxytools monitor --url https://example.com --max-latency 350
 """
 
 import argparse
 
 from proxytools.config import (
-    nonnegative_float,
-    nonnegative_int,
+    load_config,
     positive_float,
-    positive_int,
-    probability,
-    sample_count,
     web_url,
-    worker_count,
 )
 from proxytools.monitoring import MonitorEngine
 from proxytools.output.dashboard import ProxyMonitorApp
@@ -38,102 +33,66 @@ from proxytools.stability import StabilityConfig, StabilityPolicy
 from proxytools.storage import StateRepository
 
 
-def build_parser(prog="proxytools monitor"):
+def build_parser(prog="proxytools monitor", settings=None):
+    settings = settings or load_config()
     parser = argparse.ArgumentParser(prog=prog, description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    network = parser.add_argument_group("network")
-    network.add_argument("-t", "--timeout", type=positive_float, default=5, help="Seconds per proxy check")
-    network.add_argument("-w", "--workers", type=worker_count, default=50, help="Number of workers (1-100)")
-    network.add_argument("--samples", type=sample_count, default=1, help="Requests per check; median duration (1-5)")
-    network.add_argument("--refresh-interval", type=positive_float, default=10, help="Seconds between scan cycles")
-
-    stability = parser.add_argument_group("stability")
-    stability.add_argument("-l", "--max-latency", type=positive_float, default=500, help="Maximum median latency in ms")
-    stability.add_argument("--history-size", type=positive_int, default=10, help="Recent checks retained per proxy")
-    stability.add_argument("--min-checks", type=positive_int, default=5, help="Checks required before stable")
-    stability.add_argument("--min-success-rate", type=probability, default=0.8, help="Required success ratio (0-1)")
-    stability.add_argument("--min-success-streak", type=positive_int, default=3, help="Consecutive successes required")
-    stability.add_argument("--min-alive-time", type=nonnegative_float, default=60, help="Continuous live seconds required")
-    stability.add_argument("--max-jitter", type=nonnegative_float, default=500, help="Maximum latency deviation in ms")
-    stability.add_argument("--alive-failure-tolerance", type=nonnegative_int, default=2, help="Consecutive failures allowed before alive time resets")
-    stability.add_argument(
-        "--degraded-after", type=nonnegative_float, default=60,
-        help="Failed seconds allowed after STABLE before DEGRADED",
-    )
-    stability.add_argument("--retention-time", type=positive_float, default=1800, help="Seconds to retain unadvertised proxies")
-
-    display = parser.add_argument_group("display")
-    display.add_argument("--stable-only", action="store_true", help="Initially show only stable proxies")
-    display.add_argument(
+    parser.add_argument(
         "--debug", action="store_true",
         help="Show City, Exit IP, Blocked by, and route diagnostics",
     )
-    browser = parser.add_argument_group("browser")
-    browser.add_argument(
-        "--browser", choices=("auto", "chrome", "firefox"), default="auto",
-        help="Browser used by the 'b' action (default: auto)",
+    parser.add_argument(
+        "--url", type=web_url, default=settings.url,
+        help="URL that every proxy must reach; also opened by 'b'",
     )
-    browser.add_argument(
-        "--browser-url", type=web_url,
-        help="URL that every proxy must reach via requests; also opened by 'b'",
-    )
-    persistence = parser.add_argument_group("persistence")
-    persistence.add_argument(
-        "--reset-history", action="store_true",
-        help="Delete this clone's saved proxy history before monitoring",
+    parser.add_argument(
+        "--max-latency", type=positive_float, default=settings.max_latency,
+        help=f"Maximum median latency in ms (config: {settings.max_latency:g})",
     )
     return parser
 
 
-def validate_args(parser, args):
-    if args.min_checks > args.history_size:
-        parser.error("--min-checks cannot exceed --history-size")
-    if args.min_success_streak > args.history_size:
-        parser.error("--min-success-streak cannot exceed --history-size")
-
-
-def policy_from_args(args):
+def policy_from_args(args, settings=None):
+    settings = settings or load_config()
     return StabilityPolicy(
         StabilityConfig(
-            history_size=args.history_size,
-            min_checks=args.min_checks,
-            min_success_rate=args.min_success_rate,
-            min_success_streak=args.min_success_streak,
-            min_alive_time=args.min_alive_time,
+            history_size=settings.history_size,
+            min_checks=settings.min_checks,
+            min_success_rate=settings.min_success_rate,
+            min_success_streak=settings.min_success_streak,
+            min_alive_time=settings.min_alive_time,
             max_latency=args.max_latency,
-            max_jitter=args.max_jitter,
-            failure_tolerance=args.alive_failure_tolerance,
-            degraded_after=args.degraded_after,
+            max_jitter=settings.max_jitter,
+            failure_tolerance=settings.alive_failure_tolerance,
+            degraded_after=settings.degraded_after,
         )
     )
 
 
-def engine_from_args(args, repository=None):
+def engine_from_args(args, repository=None, settings=None):
+    settings = settings or load_config()
     return MonitorEngine(
-        policy=policy_from_args(args),
-        workers=args.workers,
-        timeout=args.timeout,
-        samples=args.samples,
-        refresh_interval=args.refresh_interval,
-        retention_time=args.retention_time,
+        policy=policy_from_args(args, settings),
+        workers=settings.workers,
+        timeout=settings.timeout,
+        samples=settings.samples,
+        refresh_interval=settings.refresh_interval,
+        retention_time=settings.retention_time,
         repository=repository,
-        target_url=args.browser_url,
+        target_url=args.url,
     )
 
 
 def main(argv=None):
-    parser = build_parser()
+    settings = load_config()
+    parser = build_parser(settings=settings)
     args = parser.parse_args(argv)
-    validate_args(parser, args)
     repository = StateRepository(database_path())
     try:
-        if args.reset_history:
-            repository.reset()
         ProxyMonitorApp(
-            engine_from_args(args, repository),
-            stable_only=args.stable_only,
+            engine_from_args(args, repository, settings),
             debug=args.debug,
-            browser=args.browser,
-            browser_url=args.browser_url or "about:blank",
+            browser=settings.browser,
+            browser_url=args.url or "about:blank",
         ).run()
     finally:
         repository.close()

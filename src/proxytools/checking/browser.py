@@ -1,9 +1,9 @@
-"""Optional Chrome/Selenium validation for proxies that pass HTTP checks."""
+"""Optional Chrome/Selenium validation after lightweight URL checks pass."""
 
 import json
 import time
 
-from proxytools.checking.proxy import check_url, connection_string
+from proxytools.checking.proxy import connection_string
 from proxytools.models import ProxyResult
 
 CHECK_URL_HOLD_SECONDS = 10
@@ -28,7 +28,7 @@ def verify_in_browser(result: ProxyResult, url: str, page_load_timeout: float, h
         from selenium import webdriver
         from selenium.common.exceptions import TimeoutException, WebDriverException
     except ImportError as exc:
-        raise RuntimeError("Selenium is required for --check-url; run through ./proxytools") from exc
+        raise RuntimeError("Selenium is required for --browser-check; run through ./proxytools") from exc
 
     options = webdriver.ChromeOptions()
     options.add_argument(f"--proxy-server={connection_string(result.protocol, result.proxy)}")
@@ -63,6 +63,4 @@ def browser_check(
     page_load_timeout: float,
     headless: bool,
 ) -> ProxyResult | None:
-    if not check_url(result, url, page_load_timeout):
-        return None
     return result if verify_in_browser(result, url, page_load_timeout, headless) else None

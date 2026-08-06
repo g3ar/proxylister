@@ -5,7 +5,7 @@ import sys
 from proxytools import __version__
 
 COMMANDS = {
-    "scan": "proxytools.commands.scan",
+    "list": "proxytools.commands.list",
     "monitor": "proxytools.commands.monitor",
 }
 
@@ -17,11 +17,12 @@ def show_help(stream=None):
         """Usage: ./proxytools <command> [options]
 
 Commands:
-  scan       Find, check, and export working proxies
+  list       Find and print working proxies (default)
   monitor    Monitor proxies until they meet stability criteria
   help       Show this help
 
 Options:
+  --version  Show the installed Proxy Tools version
   --clear    Remove local databases, environment, locks, and generated caches
 
 Run ./proxytools <command> --help for command-specific options.""",
@@ -31,17 +32,21 @@ Run ./proxytools <command> --help for command-specific options.""",
 
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
-    if not args or args[0] in {"help", "-h", "--help"}:
+    if args and args[0] in {"help", "-h", "--help"}:
         show_help()
         return 0
-    if args[0] == "--version":
+    if args and args[0] == "--version":
         print(__version__)
         return 0
-    if args[0] == "--clear":
+    if args and args[0] == "--clear":
         from proxytools.cleanup import main as clear
 
         return clear()
-    command = args.pop(0)
+    if args and not args[0].startswith("-") and args[0] not in COMMANDS:
+        print(f"proxytools: unknown command: {args[0]}\n", file=sys.stderr)
+        show_help(sys.stderr)
+        return 2
+    command = args.pop(0) if args and args[0] in COMMANDS else "list"
     module_name = COMMANDS.get(command)
     if module_name is None:
         print(f"proxytools: unknown command: {command}\n", file=sys.stderr)
@@ -52,7 +57,15 @@ def main(argv=None):
 
     module = import_module(module_name)
     if any(arg in {"-h", "--help"} for arg in args):
-        return module.main(args)
+        try:
+            return module.main(args)
+        except Exception as error:
+            from proxytools.config import ConfigError
+
+            if isinstance(error, ConfigError):
+                print(f"proxytools: configuration error: {error}", file=sys.stderr)
+                return 2
+            raise
 
     from proxytools.process_lock import AlreadyRunning, ProcessLock
 
@@ -67,7 +80,15 @@ def main(argv=None):
                 print(f"Updated {geoip.path.name}. {ATTRIBUTION}", file=sys.stderr)
             if geoip.warning:
                 print(f"proxytools: {geoip.warning}", file=sys.stderr)
-            return module.main(args)
+            try:
+                return module.main(args)
+            except Exception as error:
+                from proxytools.config import ConfigError
+
+                if isinstance(error, ConfigError):
+                    print(f"proxytools: configuration error: {error}", file=sys.stderr)
+                    return 2
+                raise
     except AlreadyRunning as error:
         print(f"proxytools: {error}", file=sys.stderr)
         return 1

@@ -5,6 +5,7 @@ from unittest.mock import patch
 import requests
 
 from proxytools import config
+from proxytools.commands import list as list_command
 from proxytools.checking import proxy as checker
 from proxytools.models import ProxyResult
 from proxytools.sources import proxyscrape
@@ -101,6 +102,20 @@ class ProxyLibraryTests(unittest.TestCase):
                     result, "https://example.com", 3, accept_forbidden=True
                 )
             )
+
+    def test_list_candidate_uses_https_identity_and_lightweight_url_check(self):
+        result = ProxyResult("http", "1.2.3.4:80", True, 50)
+        with patch.object(list_command, "check_proxy", return_value=result), patch.object(
+            list_command, "probe_https_route", return_value=True
+        ) as identity, patch.object(list_command, "check_url", return_value=True) as target:
+            checked = list_command.check_candidate(
+                "http", "1.2.3.4:80", 3, 1, "https://example.com"
+            )
+        self.assertIs(checked, result)
+        identity.assert_called_once_with(result, 3)
+        target.assert_called_once_with(
+            result, "https://example.com", 3, accept_forbidden=True
+        )
 
     def test_argument_validators_reject_bad_values(self):
         for value in ("0", "-1"):

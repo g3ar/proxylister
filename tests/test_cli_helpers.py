@@ -1,13 +1,9 @@
-import csv
-import json
-from pathlib import Path
-import tempfile
 import unittest
 
-from proxytools.commands.scan import web_url
+from proxytools.config import web_url
 from proxytools.models import ProxyResult
 from proxytools.output.dashboard import format_duration
-from proxytools.output.serializers import filter_and_sort, write_results
+from proxytools.output.serializers import filter_and_sort
 from proxytools.stability import ProxyHistory, StabilityConfig, StabilityPolicy
 from proxytools.stability.history import expire_histories, update_advertised
 
@@ -19,18 +15,6 @@ class CliHelperTests(unittest.TestCase):
 
     def test_filter_and_sort(self):
         self.assertEqual(filter_and_sort([self.slow, self.fast], 500), [self.fast])
-
-    def test_output_formats(self):
-        with tempfile.TemporaryDirectory() as directory:
-            for output_format in ("text", "json", "csv"):
-                path = Path(directory) / output_format
-                write_results([self.fast], str(path), output_format)
-                content = path.read_text(encoding="utf-8")
-                self.assertIn("United States", content)
-                if output_format == "json":
-                    self.assertEqual(json.loads(content)["protocol"], "http")
-                if output_format == "csv":
-                    self.assertEqual(next(csv.DictReader(content.splitlines()))["proxy"], "1.2.3.4:80")
 
     def test_url_validation(self):
         self.assertEqual(web_url("https://example.com/a"), "https://example.com/a")

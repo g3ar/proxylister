@@ -1,10 +1,6 @@
-"""Text, JSON Lines, and CSV proxy-result serialization."""
+"""Filtering and optional detailed text formatting for list results."""
 
 from __future__ import annotations
-
-import csv
-import json
-from pathlib import Path
 
 from proxytools.checking import connection_string
 from proxytools.models import ProxyResult
@@ -38,21 +34,3 @@ def filter_and_sort(results: list[ProxyResult], max_latency_ms: float) -> list[P
         (result for result in results if result.latency_ms is not None and result.latency_ms < max_latency_ms),
         key=lambda result: result.latency_ms,
     )
-
-
-def write_results(results: list[ProxyResult], output_path: str, output_format: str) -> None:
-    path = Path(output_path)
-    records = [result_record(result) for result in results]
-    with path.open("w", encoding="utf-8", newline="") as output:
-        if output_format == "text":
-            output.write("\n".join(format_result(result) for result in results))
-            if results:
-                output.write("\n")
-        elif output_format == "json":
-            for record in records:
-                output.write(json.dumps(record, ensure_ascii=False) + "\n")
-        else:
-            fieldnames = list(result_record(ProxyResult("", "", True, 0)).keys())
-            writer = csv.DictWriter(output, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(records)

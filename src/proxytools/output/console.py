@@ -3,7 +3,7 @@
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn, TimeElapsedColumn
 
-console = Console()
+console = Console(stderr=True)
 
 
 def progress_display():

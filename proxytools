@@ -12,11 +12,12 @@ show_help() {
         'Usage: ./proxytools <command> [options]' \
         '' \
         'Commands:' \
-        '  scan       Find, check, and export working proxies' \
+        '  list       Find and print working proxies (default)' \
         '  monitor    Monitor proxies until they meet stability criteria' \
         '  help       Show this help' \
         '' \
         'Options:' \
+        '  --version  Show the installed Proxy Tools version' \
         '  --clear    Remove local databases, environment, locks, and generated caches' \
         '' \
         'Run ./proxytools <command> --help for command-specific options.' \
@@ -24,12 +25,24 @@ show_help() {
 }
 
 if [ "$#" -eq 0 ]; then
-    show_help
-    exit 0
+    COMMAND=list
+else
+    COMMAND=$1
+    case "$COMMAND" in
+        list|monitor)
+            shift
+            ;;
+        help|-h|--help|--version|--clear)
+            shift
+            ;;
+        -*)
+            COMMAND=list
+            ;;
+        *)
+            shift
+            ;;
+    esac
 fi
-
-COMMAND=$1
-shift
 
 if [ "$COMMAND" = "--clear" ]; then
     if ! command -v python3 >/dev/null 2>&1; then
@@ -49,7 +62,7 @@ case "$COMMAND" in
         ;;
     --version)
         ;;
-    scan)
+    list)
         ;;
     monitor)
         ;;
