@@ -41,6 +41,7 @@ class MonitorEngineTests(unittest.TestCase):
     def test_active_lane_rechecks_saved_proxy_while_discovery_is_still_running(self):
         stop = threading.Event()
         checked_keys = []
+        snapshots = []
         saved_checks = 0
         policy = StabilityPolicy(
             StabilityConfig(min_checks=1, min_success_streak=1, min_alive_time=0)
@@ -71,10 +72,17 @@ class MonitorEngineTests(unittest.TestCase):
         saved.latest = ProxyResult("http", saved.proxy, True, 40, "France")
         saved.restored = True
         engine.histories[saved.key] = saved
-        engine.run(stop, lambda snapshot: None)
+        engine.run(stop, snapshots.append)
 
         self.assertGreaterEqual(checked_keys.count(("http", "1.2.3.4:80")), 2)
         self.assertIn(("http", "5.6.7.8:80"), checked_keys)
+        resort_snapshots = [snapshot for snapshot in snapshots if snapshot.resort]
+        self.assertTrue(resort_snapshots)
+        self.assertTrue(all(
+            snapshot.active_total > 0
+            and snapshot.active_checked == snapshot.active_total
+            for snapshot in resort_snapshots
+        ))
 
     def test_browser_url_is_checked_with_requests_after_proxy_succeeds(self):
         engine = MonitorEngine(

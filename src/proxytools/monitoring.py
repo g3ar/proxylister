@@ -244,12 +244,13 @@ class MonitorEngine:
                 else:
                     stop.wait(0.1)
 
-                resort = False
+                active_lane_finished = False
                 for future in done:
                     if future in active_pending:
                         key = active_pending.pop(future)
                         active_checked += 1
                         lane_finished = not active_pending
+                        active_lane_finished = active_lane_finished or lane_finished
                     else:
                         key = discovery_pending.pop(future)
                         discovery_checked += 1
@@ -261,10 +262,9 @@ class MonitorEngine:
                     if history is not None:
                         self._record_result(history, result)
                         dirty_keys.add(key)
-                    resort = resort or lane_finished
 
                 publish_now = time.monotonic()
-                if dirty_keys and (resort or publish_now - last_publish_at >= 0.2):
+                if dirty_keys and (active_lane_finished or publish_now - last_publish_at >= 0.2):
                     publish(self.snapshot(
                         active_checked + discovery_checked,
                         active_total + discovery_total,
@@ -274,7 +274,7 @@ class MonitorEngine:
                         active_total=active_total,
                         discovery_checked=discovery_checked,
                         discovery_total=discovery_total,
-                        resort=resort,
+                        resort=active_lane_finished,
                     ))
                     dirty_keys.clear()
                     last_publish_at = publish_now

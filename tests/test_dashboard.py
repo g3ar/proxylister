@@ -58,6 +58,11 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(table.cursor_row, 1)
             selected = table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value
             self.assertEqual(selected, "socks5|5.6.7.8:80")
+            before_resort_row = table.cursor_row
+            app.receive_snapshot(replace(two_rows, incremental=True, changed_rows=(), resort=True))
+            self.assertEqual(table.cursor_row, before_resort_row)
+            selected = table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value
+            self.assertEqual(selected, "socks5|5.6.7.8:80")
             sorted_snapshot = replace(
                 two_rows,
                 checked=10,

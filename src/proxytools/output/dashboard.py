@@ -33,7 +33,6 @@ class MonitorDataTable(DataTable):
         Binding("s", "monitor_states", "States"),
         Binding("p", "monitor_protocols", "Protocols"),
         Binding("c", "monitor_country_filter", "Country"),
-        Binding("r", "monitor_refresh", "Refresh"),
         Binding("b", "monitor_browser", "Browser"),
     ]
 
@@ -48,9 +47,6 @@ class MonitorDataTable(DataTable):
 
     def action_monitor_country_filter(self):
         self.app.action_country_filter()
-
-    def action_monitor_refresh(self):
-        self.app.action_refresh()
 
     def action_monitor_browser(self):
         self.app.action_browser()
@@ -265,7 +261,6 @@ class ProxyMonitorApp(App):
         Binding("s", "states", "States"),
         Binding("p", "protocols", "Protocols"),
         Binding("c", "country_filter", "Country"),
-        Binding("r", "refresh", "Refresh"),
         Binding("b", "browser", "Browser"),
     ]
     COLUMNS = (
@@ -374,6 +369,11 @@ class ProxyMonitorApp(App):
     def render_changed_rows(self, snapshot: MonitorSnapshot):
         """Apply progress updates without walking every row in the table."""
         table = self.query_one("#table", DataTable)
+        selected_key = None
+        selected_row = table.cursor_row
+        scroll_y = float(table.scroll_y)
+        if table.row_count:
+            selected_key = str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
         for row in snapshot.changed_rows:
             key = f"{row.key[0]}|{row.key[1]}"
             if not self._row_visible(row):
@@ -395,6 +395,14 @@ class ProxyMonitorApp(App):
         self._render_status(snapshot, len(self.rows_by_key))
         if snapshot.resort:
             table.sort("state", "median", key=self._monitor_sort_key)
+            if selected_key in self.rows_by_key:
+                new_row = table.get_row_index(selected_key)
+                table.move_cursor(row=new_row, animate=False, scroll=False)
+                table.scroll_to(
+                    y=max(0, scroll_y + new_row - selected_row),
+                    animate=False,
+                    immediate=True,
+                )
 
         if table.row_count:
             selected = str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
@@ -585,10 +593,6 @@ class ProxyMonitorApp(App):
             self._render_details(self.rows_by_key[key])
         else:
             self.query_one("#details", Static).update("No proxies match the current filter.")
-
-    def action_refresh(self):
-        self.engine.request_refresh()
-        self.notify("Refresh requested")
 
     def action_browser(self):
         if self.browser_process is not None and self.browser_process.poll() is None:
