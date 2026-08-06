@@ -138,6 +138,8 @@ Rows are grouped by state and then ordered by latency:
 3. `DEGRADED`.
 
 Rows remain in place while checks are completing and are reordered at controlled pass boundaries. This keeps the selected row from jumping while you navigate the table.
+The monitor starts with no proxy selected; use the arrows or click a row when
+you want to act on one.
 
 The status area reports only what the monitor is doing, such as loading saved proxies, checking the current batch, or waiting for the next check. A second line appears only when filters differ from their defaults. Internal cycle and candidate counters are deliberately omitted because the table already shows the user-facing result.
 

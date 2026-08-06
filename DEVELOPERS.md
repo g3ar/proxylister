@@ -245,6 +245,8 @@ Selection is optional. `Esc`, a repeated click on the selected row, and the
 `b` action clear the visible cursor while preserving the current
 viewport. Snapshot updates and controlled resorts must not restore or follow
 the former proxy key until keyboard or mouse navigation selects a row again.
+The table mounts with its cursor hidden, so startup and the first snapshot must
+not select the first proxy automatically.
 Clicks on empty table space or outside the table also clear selection; an
 outside click must continue bubbling to the control that received it.
 Double-clicking a proxy selects that row and opens the same details modal as

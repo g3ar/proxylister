@@ -76,6 +76,7 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             app.receive_snapshot(snapshot)
             await pilot.pause()
             table = app.query_one(DataTable)
+            table.show_cursor = True
             table.move_cursor(row=20, animate=False)
             await pilot.pause()
             scroll_y = float(table.scroll_y)
@@ -118,7 +119,7 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             app.receive_snapshot(snapshot)
             await pilot.pause()
             table = app.query_one(DataTable)
-            self.assertTrue(table.show_cursor)
+            self.assertFalse(table.show_cursor)
             await pilot.click("#table", offset=(70, 2))
             await pilot.pause()
             self.assertTrue(table.show_cursor)

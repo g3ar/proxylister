@@ -104,6 +104,7 @@ class ProxyMonitorApp(App):
     def on_mount(self):
         table = self.query_one("#table", DataTable)
         table.add_columns(*self.columns)
+        table.show_cursor = False
         table.focus()
         if self.autostart:
             self.monitor_worker()
