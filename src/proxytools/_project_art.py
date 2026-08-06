@@ -1,4 +1,9 @@
-"""Hidden, dependency-free terminal artwork for an intentional CLI typo."""
+"""Isolated decorative project joke; not a functional Proxy Tools module.
+
+Keep this private, dependency-free, and disconnected from normal application
+workflows. It is not a reusable rendering API, a supported feature surface, or
+a component that should be expanded while implementing unrelated work.
+"""
 
 from __future__ import annotations
 

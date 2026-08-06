@@ -46,7 +46,7 @@ def main(argv=None):
         print(format_about())
         return 0
     if args and args[0] == "--abut":
-        from proxytools.easteregg import show
+        from proxytools._project_art import show
 
         show()
         return 0
