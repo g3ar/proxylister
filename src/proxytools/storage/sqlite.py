@@ -17,7 +17,7 @@ import time
 from proxytools.models import ProxyResult
 from proxytools.stability.history import ProxyHistory
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,7 +63,7 @@ class StateRepository:
                 last_checked_at REAL,
                 last_success_at REAL,
                 last_failure_at REAL,
-                last_check_ok INTEGER,
+                last_check_accepted INTEGER,
                 total_successes INTEGER NOT NULL DEFAULT 0,
                 total_failures INTEGER NOT NULL DEFAULT 0,
                 total_observed_uptime REAL NOT NULL DEFAULT 0,
@@ -76,9 +76,10 @@ class StateRepository:
                 id INTEGER PRIMARY KEY,
                 proxy_id INTEGER NOT NULL REFERENCES proxies(id) ON DELETE CASCADE,
                 checked_at REAL NOT NULL,
-                ok INTEGER NOT NULL,
-                reachable INTEGER,
+                accepted INTEGER NOT NULL,
+                reachable INTEGER NOT NULL,
                 latency_ms INTEGER,
+                failure_reason TEXT NOT NULL DEFAULT '',
                 country TEXT NOT NULL DEFAULT 'Unknown',
                 lat REAL, lon REAL
             );
@@ -120,7 +121,7 @@ class StateRepository:
                     )
                     continue
                 previous = self.connection.execute(
-                    "SELECT id, last_checked_at, last_check_ok FROM proxies WHERE protocol=? AND address=?",
+                    "SELECT id, last_checked_at, last_check_accepted FROM proxies WHERE protocol=? AND address=?",
                     result.key,
                 ).fetchone()
                 uptime = 0.0
@@ -134,7 +135,7 @@ class StateRepository:
                     """
                     INSERT INTO proxies (
                         protocol,address,country,city,exit_ip,lat,lon,first_seen_at,last_seen_at,last_checked_at,
-                        last_success_at,last_failure_at,last_check_ok,total_successes,total_failures,
+                        last_success_at,last_failure_at,last_check_accepted,total_successes,total_failures,
                         total_observed_uptime,current_state,failure_since,was_stable
                     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     ON CONFLICT(protocol,address) DO UPDATE SET
@@ -145,7 +146,7 @@ class StateRepository:
                         last_seen_at=excluded.last_seen_at, last_checked_at=excluded.last_checked_at,
                         last_success_at=COALESCE(excluded.last_success_at,proxies.last_success_at),
                         last_failure_at=COALESCE(excluded.last_failure_at,proxies.last_failure_at),
-                        last_check_ok=excluded.last_check_ok,
+                        last_check_accepted=excluded.last_check_accepted,
                         total_successes=proxies.total_successes+excluded.total_successes,
                         total_failures=proxies.total_failures+excluded.total_failures,
                         total_observed_uptime=proxies.total_observed_uptime+excluded.total_observed_uptime,
@@ -163,10 +164,14 @@ class StateRepository:
                     "SELECT id FROM proxies WHERE protocol=? AND address=?", result.key
                 ).fetchone()[0]
                 self.connection.execute(
-                    "INSERT INTO checks(proxy_id,checked_at,ok,reachable,latency_ms,country,lat,lon) VALUES(?,?,?,?,?,?,?,?)",
+                    """INSERT INTO checks(
+                           proxy_id,checked_at,accepted,reachable,latency_ms,
+                           failure_reason,country,lat,lon
+                       ) VALUES(?,?,?,?,?,?,?,?,?)""",
                     (proxy_id, item.checked_at, int(item.accepted),
-                     int(result.ok and result.latency_ms is not None), result.latency_ms,
-                     result.country, result.lat, result.lon),
+                     int(result.reachable and result.latency_ms is not None),
+                     result.latency_ms, result.failure_reason, result.country,
+                     result.lat, result.lon),
                 )
                 if item.old_state != item.new_state:
                     self.connection.execute(
@@ -180,7 +185,7 @@ class StateRepository:
             self.connection.execute(
                 """DELETE FROM proxies
                    WHERE current_state NOT IN ('STABLE','PROBATION')
-                      OR (last_check_ok IS NOT 1 AND failure_since IS NULL
+                      OR (last_check_accepted IS NOT 1 AND failure_since IS NULL
                           AND current_state != 'STABLE')"""
             )
 
@@ -191,40 +196,61 @@ class StateRepository:
             raise RuntimeError(
                 f"database schema {version} is newer than supported {SCHEMA_VERSION}"
             )
-        if version == SCHEMA_VERSION:
-            return
+        if version < 1:
+            # Version 1 consolidated additive columns from pre-versioned builds.
+            columns = {
+                row[1] for row in self.connection.execute("PRAGMA table_info(proxies)")
+            }
+            additions = {
+                "failure_since": "REAL",
+                "city": "TEXT NOT NULL DEFAULT 'Unknown'",
+                "exit_ip": "TEXT NOT NULL DEFAULT ''",
+                "was_stable": "INTEGER NOT NULL DEFAULT 0",
+            }
+            with self.connection:
+                for name, definition in additions.items():
+                    if name not in columns:
+                        self.connection.execute(
+                            f"ALTER TABLE proxies ADD COLUMN {name} {definition}"
+                        )
+                check_columns = {
+                    row[1] for row in self.connection.execute("PRAGMA table_info(checks)")
+                }
+                if "reachable" not in check_columns:
+                    self.connection.execute("ALTER TABLE checks ADD COLUMN reachable INTEGER")
+                self.connection.execute(
+                    """UPDATE proxies SET was_stable=1
+                       WHERE current_state='STABLE' OR EXISTS (
+                           SELECT 1 FROM state_transitions
+                           WHERE state_transitions.proxy_id=proxies.id
+                             AND state_transitions.new_state='STABLE'
+                       )"""
+                )
+                self.connection.execute("PRAGMA user_version=1")
+            version = 1
 
-        # Version 1 consolidates all additive columns introduced by the
-        # pre-versioned application. Legacy extra columns remain harmless.
-        columns = {
-            row[1] for row in self.connection.execute("PRAGMA table_info(proxies)")
-        }
-        additions = {
-            "failure_since": "REAL",
-            "city": "TEXT NOT NULL DEFAULT 'Unknown'",
-            "exit_ip": "TEXT NOT NULL DEFAULT ''",
-            "was_stable": "INTEGER NOT NULL DEFAULT 0",
-        }
-        with self.connection:
-            for name, definition in additions.items():
-                if name not in columns:
-                    self.connection.execute(
-                        f"ALTER TABLE proxies ADD COLUMN {name} {definition}"
-                    )
+        if version < 2:
+            # Version 2 names reachability and complete acceptance separately.
+            columns = {
+                row[1] for row in self.connection.execute("PRAGMA table_info(proxies)")
+            }
             check_columns = {
                 row[1] for row in self.connection.execute("PRAGMA table_info(checks)")
             }
-            if "reachable" not in check_columns:
-                self.connection.execute("ALTER TABLE checks ADD COLUMN reachable INTEGER")
-            self.connection.execute(
-                """UPDATE proxies SET was_stable=1
-                   WHERE current_state='STABLE' OR EXISTS (
-                       SELECT 1 FROM state_transitions
-                       WHERE state_transitions.proxy_id=proxies.id
-                         AND state_transitions.new_state='STABLE'
-                   )"""
-            )
-            self.connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+            with self.connection:
+                if "last_check_ok" in columns and "last_check_accepted" not in columns:
+                    self.connection.execute(
+                        "ALTER TABLE proxies RENAME COLUMN last_check_ok TO last_check_accepted"
+                    )
+                if "ok" in check_columns and "accepted" not in check_columns:
+                    self.connection.execute(
+                        "ALTER TABLE checks RENAME COLUMN ok TO accepted"
+                    )
+                if "failure_reason" not in check_columns:
+                    self.connection.execute(
+                        "ALTER TABLE checks ADD COLUMN failure_reason TEXT NOT NULL DEFAULT ''"
+                    )
+                self.connection.execute("PRAGMA user_version=2")
 
     def load_histories(self, policy, retention_time: float, restart_tolerance: float, *, now_wall=None, now_mono=None):
         """Rebuild recent rolling histories without counting a long offline gap."""
@@ -233,14 +259,14 @@ class StateRepository:
         histories = {}
         proxies = self.connection.execute(
             """SELECT id,protocol,address,country,city,exit_ip,lat,lon,first_seen_at,total_observed_uptime,
-                      last_failure_at,last_checked_at,last_check_ok,current_state,failure_since,was_stable
+                      last_failure_at,last_checked_at,last_check_accepted,current_state,failure_since,was_stable
                FROM proxies ORDER BY
                    CASE current_state WHEN 'STABLE' THEN 0 WHEN 'DEGRADED' THEN 1 ELSE 2 END,
                    last_checked_at DESC"""
         ).fetchall()
         for (proxy_id, protocol, address, country, city, exit_ip, lat, lon,
              first_seen, uptime,
-             last_failure, last_checked, last_check_ok, stored_state, failure_since,
+             last_failure, last_checked, _last_check_accepted, stored_state, failure_since,
              was_stable) in proxies:
             history = ProxyHistory(protocol, address, policy.config.history_size)
             history.first_seen_at = first_seen
@@ -248,23 +274,22 @@ class StateRepository:
             history.last_failure_at = last_failure
             history.was_stable = bool(was_stable)
             samples = self.connection.execute(
-                """SELECT checked_at,ok,reachable,latency_ms,country,lat,lon FROM (
-                       SELECT checked_at,ok,reachable,latency_ms,country,lat,lon FROM checks
+                """SELECT checked_at,accepted,reachable,latency_ms,failure_reason,country,lat,lon FROM (
+                       SELECT checked_at,accepted,reachable,latency_ms,failure_reason,country,lat,lon FROM checks
                        WHERE proxy_id=? ORDER BY checked_at DESC LIMIT ?
                    ) ORDER BY checked_at""",
                 (proxy_id, policy.config.history_size),
             ).fetchall()
-            for checked_at, ok, reachable, latency, country, lat, lon in samples:
+            for checked_at, _accepted, reachable, latency, failure_reason, country, lat, lon in samples:
                 synthetic_now = now_mono - max(0, now_wall - checked_at)
                 result = ProxyResult(
-                    protocol, address,
-                    bool(ok if reachable is None else reachable),
-                    latency, country, lat, lon,
+                    protocol, address, bool(reachable), latency, country, lat, lon,
+                    failure_reason=failure_reason,
                 )
                 history.record(result, synthetic_now, policy)
             if history.latest is None:
                 history.latest = ProxyResult(
-                    protocol, address, bool(last_check_ok), None, country, lat, lon,
+                    protocol, address, False, None, country, lat, lon,
                     city=city, exit_ip=exit_ip,
                 )
             else:

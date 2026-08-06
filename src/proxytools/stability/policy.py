@@ -29,7 +29,7 @@ class StabilityPolicy:
     def blockers(self, history: "ProxyHistory", now: float) -> list[str]:
         config = self.config
         reasons = []
-        if not history.samples or not history.samples[-1].ok:
+        if not history.samples or not history.samples[-1].accepted:
             reasons.append(history.samples[-1].failure_reason if history.samples else "failed")
         if history.alive_for(now) < config.min_alive_time:
             reasons.append("alive")

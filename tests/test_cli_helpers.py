@@ -120,6 +120,21 @@ class CliHelperTests(unittest.TestCase):
         self.assertEqual(history.consecutive_failures, 0)
         self.assertIsNone(history.failure_since)
 
+    def test_url_failure_is_reachable_but_not_accepted(self):
+        config = StabilityConfig(min_checks=1, min_success_streak=1, min_alive_time=0)
+        policy = StabilityPolicy(config)
+        history = ProxyHistory("http", self.fast.proxy, config.history_size)
+        result = ProxyResult("http", self.fast.proxy, True, 125, failure_reason="url")
+
+        history.record(result, 100, policy)
+
+        sample = history.samples[-1]
+        self.assertTrue(sample.reachable)
+        self.assertFalse(sample.accepted)
+        self.assertEqual(history.median_latency, 125)
+        self.assertEqual(history.success_rate, 0)
+        self.assertEqual(policy.blockers(history, 100)[0], "url")
+
     def test_duration_format(self):
         self.assertEqual(format_duration(65), "01:05")
         self.assertEqual(format_duration(299.9), "04:59")

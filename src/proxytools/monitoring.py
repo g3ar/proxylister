@@ -111,7 +111,10 @@ class MonitorEngine:
         )
         rows = []
         for history in histories:
-            if history.latest is None:
+            # Candidates without a usable latency measurement remain in the
+            # engine's queues for later retries, but expose no meaningful row
+            # to the user yet.
+            if history.latest is None or history.median_latency is None:
                 continue
             rows.append(
                 MonitorRow(
@@ -299,7 +302,7 @@ class MonitorEngine:
             and (
                 history.restored
                 or history.failure_since is not None
-                or (history.samples and history.samples[-1].ok)
+                or (history.samples and history.samples[-1].accepted)
             )
         )
 
@@ -315,11 +318,10 @@ class MonitorEngine:
     def _check_candidate(self, protocol, proxy):
         """Validate the proxy's HTTPS identity and optional target."""
         result = self.checker(protocol, proxy, self.timeout, self.samples)
-        if result.ok and self.target_url:
+        if result.reachable and self.target_url:
             if not check_url(
                 result, self.target_url, self.timeout, accept_forbidden=True
             ):
-                result.ok = False
                 result.failure_reason = "url"
         return result
 
@@ -329,10 +331,10 @@ class MonitorEngine:
         old_state = history.state
         previous = history.samples[-1] if history.samples else None
         history.record(result, checked_mono, self.policy)
-        accepted = history.samples[-1].ok
+        accepted = history.samples[-1].accepted
         if history.first_seen_at is None:
             history.first_seen_at = checked_wall
-        if accepted and previous is not None and previous.ok:
+        if accepted and previous is not None and previous.accepted:
             gap = checked_mono - previous.checked_at
             if 0 <= gap <= self.continuity_tolerance:
                 history.total_observed_uptime += gap

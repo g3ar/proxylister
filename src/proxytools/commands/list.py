@@ -55,10 +55,9 @@ def validate_args(parser, args):
 def check_candidate(protocol, proxy, timeout, samples, url):
     """Run HTTPS identity and optional target checks without Selenium."""
     result = check_proxy(protocol, proxy, timeout, samples)
-    if result.ok and url and not check_url(
+    if result.reachable and url and not check_url(
         result, url, timeout, accept_forbidden=True
     ):
-        result.ok = False
         result.failure_reason = "url"
     return result
 
@@ -94,9 +93,13 @@ def main(argv=None):
             task = progress.add_task("Checking proxies", total=len(entries), status="starting")
             for future in concurrent.futures.as_completed(futures):
                 result = future.result()
-                if result.ok:
+                if result.reachable:
                     working.append(result)
-                    if result.latency_ms is not None and result.latency_ms < args.max_latency:
+                    if (
+                        not result.failure_reason
+                        and result.latency_ms is not None
+                        and result.latency_ms < args.max_latency
+                    ):
                         valid.append(result)
                         if browser_pool:
                             browser_futures.add(

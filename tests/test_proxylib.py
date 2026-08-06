@@ -54,7 +54,7 @@ class ProxyLibraryTests(unittest.TestCase):
         ):
             session.return_value.get.return_value = response
             result = checker.check_proxy("http", "1.2.3.4:80", samples=3)
-        self.assertTrue(result.ok)
+        self.assertTrue(result.reachable)
         self.assertEqual(result.latency_ms, 200)
         self.assertEqual(result.exit_ip, "203.0.113.20")
         self.assertEqual((result.country, result.city), ("Germany", "Nuremberg"))

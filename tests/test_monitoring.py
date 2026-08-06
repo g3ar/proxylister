@@ -9,6 +9,20 @@ from proxytools.stability.history import ProxyHistory
 
 
 class MonitorEngineTests(unittest.TestCase):
+    def test_snapshot_hides_proxy_without_measured_latency(self):
+        engine = MonitorEngine(
+            policy=StabilityPolicy(StabilityConfig()), workers=1, timeout=1,
+            samples=1, refresh_interval=1, retention_time=60,
+        )
+        history = ProxyHistory("http", "1.2.3.4:80", 10)
+        history.latest = ProxyResult("http", history.proxy, False)
+        engine.histories[history.key] = history
+
+        snapshot = engine.snapshot()
+
+        self.assertEqual(snapshot.rows, ())
+        self.assertEqual(snapshot.tracked_count, 1)
+
     def test_engine_emits_immutable_stable_snapshot(self):
         stop = threading.Event()
         snapshots = []
@@ -92,7 +106,7 @@ class MonitorEngineTests(unittest.TestCase):
         )
         with patch("proxytools.monitoring.check_url", return_value=True) as target_check:
             result = engine._check_candidate("http", "1.2.3.4:80")
-        self.assertTrue(result.ok)
+        self.assertTrue(result.reachable)
         target_check.assert_called_once_with(
             result, "https://example.com", 3, accept_forbidden=True
         )
@@ -107,7 +121,7 @@ class MonitorEngineTests(unittest.TestCase):
             result = engine._check_candidate("http", "1.2.3.4:80")
         history = ProxyHistory("http", result.proxy, 10)
         history.record(result, 100, engine.policy)
-        self.assertFalse(result.ok)
+        self.assertTrue(result.reachable)
         self.assertEqual(result.failure_reason, "url")
         self.assertEqual(history.state, "PROBATION")
         self.assertEqual(history.failure_since, 100)
@@ -121,7 +135,7 @@ class MonitorEngineTests(unittest.TestCase):
         )
         with patch("proxytools.monitoring.check_url") as target_check:
             result = engine._check_candidate("http", "1.2.3.4:80")
-        self.assertFalse(result.ok)
+        self.assertFalse(result.reachable)
         target_check.assert_not_called()
 
     def test_failed_https_identity_check_stays_failed_without_browser_url(self):
@@ -133,7 +147,7 @@ class MonitorEngineTests(unittest.TestCase):
 
         result = engine._check_candidate("http", "1.2.3.4:80")
 
-        self.assertFalse(result.ok)
+        self.assertFalse(result.reachable)
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass
 class ProxyResult:
     protocol: str
     proxy: str
-    ok: bool
+    reachable: bool
     latency_ms: int | None = None
     country: str = "Unknown"
     lat: float | None = None

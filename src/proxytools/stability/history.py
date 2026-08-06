@@ -14,7 +14,8 @@ from proxytools.stability.policy import StabilityPolicy
 @dataclass(slots=True)
 class CheckSample:
     checked_at: float
-    ok: bool
+    reachable: bool
+    accepted: bool
     latency_ms: int | None
     failure_reason: str = ""
 
@@ -47,28 +48,32 @@ class ProxyHistory:
         return self.protocol, self.proxy
 
     @property
-    def successful_latencies(self) -> list[int]:
-        return [sample.latency_ms for sample in self.samples if sample.ok and sample.latency_ms is not None]
+    def measured_latencies(self) -> list[int]:
+        return [
+            sample.latency_ms
+            for sample in self.samples
+            if sample.reachable and sample.latency_ms is not None
+        ]
 
     @property
     def success_rate(self) -> float:
-        return sum(sample.ok for sample in self.samples) / len(self.samples) if self.samples else 0
+        return sum(sample.accepted for sample in self.samples) / len(self.samples) if self.samples else 0
 
     @property
     def median_latency(self) -> int | None:
-        values = self.successful_latencies
+        values = self.measured_latencies
         return round(statistics.median(values)) if values else None
 
     @property
     def p95_latency(self) -> int | None:
-        values = sorted(self.successful_latencies)
+        values = sorted(self.measured_latencies)
         if not values:
             return None
         return values[max(0, math.ceil(len(values) * 0.95) - 1)]
 
     @property
     def jitter(self) -> int:
-        values = self.successful_latencies
+        values = self.measured_latencies
         return round(statistics.pstdev(values)) if len(values) > 1 else 0
 
     def alive_for(self, now: float) -> float:
@@ -77,35 +82,35 @@ class ProxyHistory:
     def record(self, result: ProxyResult, now: float, policy: StabilityPolicy) -> None:
         self.restored = False
         config = policy.config
-        reachable = result.ok and result.latency_ms is not None
-        succeeded = reachable and result.latency_ms < config.max_latency
-        hard_failure = not reachable
+        reachable = result.reachable and result.latency_ms is not None
+        accepted = (
+            reachable
+            and result.latency_ms < config.max_latency
+            and not result.failure_reason
+        )
+        hard_failure = not reachable or result.failure_reason == "url"
         recovering = self.was_stable and self.state != "STABLE"
         failure_reason = ""
-        if not succeeded:
-            failure_reason = result.failure_reason or ("failed" if not result.ok else "latency")
+        if not accepted:
+            failure_reason = result.failure_reason or ("failed" if not reachable else "latency")
         self.samples.append(
-            CheckSample(now, succeeded, result.latency_ms if succeeded else None, failure_reason)
+            CheckSample(now, reachable, accepted, result.latency_ms, failure_reason)
         )
         if reachable:
             self.latest = result
-            self.consecutive_failures = 0
-            if self.alive_since is None:
-                self.alive_since = now
-            self.failure_since = None
-            self.consecutive_successes = self.consecutive_successes + 1 if succeeded else 0
-        else:
-            # A target-URL failure still proved that the proxy itself answered
-            # and produced geolocation data. Keep it visible in the dashboard,
-            # but classify the complete health check as degraded.
-            if result.failure_reason == "url":
-                self.latest = result
+        if hard_failure:
             self.consecutive_successes = 0
             self.consecutive_failures += 1
             if self.consecutive_failures > config.failure_tolerance:
                 self.alive_since = None
+        else:
+            self.consecutive_failures = 0
+            if self.alive_since is None:
+                self.alive_since = now
+            self.failure_since = None
+            self.consecutive_successes = self.consecutive_successes + 1 if accepted else 0
 
-        if succeeded and recovering:
+        if accepted and recovering:
             # A proxy that already earned STABLE only needs one clean recovery
             # check; it need not repeat the full initial admission period.
             self.stable_since = now

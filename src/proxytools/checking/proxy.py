@@ -31,21 +31,21 @@ def check_proxy(protocol: str, proxy: str, timeout: float = 5, samples: int = 1)
             try:
                 candidate = response.json()
                 if response.status_code != 200 or not candidate.get("ip"):
-                    return ProxyResult(protocol, proxy, False)
+                    return ProxyResult(protocol, proxy, reachable=False)
                 durations.append(round((time.perf_counter() - started) * 1000))
                 data = candidate
             finally:
                 response.close()
         except (requests.RequestException, ValueError):
-            return ProxyResult(protocol, proxy, False)
+            return ProxyResult(protocol, proxy, reachable=False)
     if data is None:
-        return ProxyResult(protocol, proxy, False)
+        return ProxyResult(protocol, proxy, reachable=False)
     exit_ip = data["ip"]
     location = locate(exit_ip)
     return ProxyResult(
         protocol=protocol,
         proxy=proxy,
-        ok=True,
+        reachable=True,
         latency_ms=round(statistics.median(durations)),
         country=location["country"],
         lat=location["lat"],

@@ -42,6 +42,53 @@ class PersistenceTests(unittest.TestCase):
         version = self.repository.connection.execute("PRAGMA user_version").fetchone()[0]
         self.assertEqual(version, SCHEMA_VERSION)
 
+    def test_version_one_names_are_migrated_to_explicit_semantics(self):
+        connection = self.repository.connection
+        connection.execute(
+            "ALTER TABLE proxies RENAME COLUMN last_check_accepted TO last_check_ok"
+        )
+        connection.execute("ALTER TABLE checks RENAME COLUMN accepted TO ok")
+        connection.execute("PRAGMA user_version=1")
+        connection.commit()
+        self.repository.close()
+
+        self.repository = StateRepository(self.path)
+
+        proxy_columns = {
+            row[1] for row in self.repository.connection.execute("PRAGMA table_info(proxies)")
+        }
+        check_columns = {
+            row[1] for row in self.repository.connection.execute("PRAGMA table_info(checks)")
+        }
+        self.assertIn("last_check_accepted", proxy_columns)
+        self.assertNotIn("last_check_ok", proxy_columns)
+        self.assertIn("accepted", check_columns)
+        self.assertNotIn("ok", check_columns)
+
+    def test_reachability_and_acceptance_are_persisted_separately(self):
+        result = ProxyResult(
+            "http", "1.2.3.4:80", True, 125, "France", failure_reason="url"
+        )
+        self.repository.save_checks(
+            [
+                CheckObservation(
+                    result, 100, False, "STABLE", "PROBATION", "url", 100
+                )
+            ],
+            continuity_tolerance=20,
+        )
+
+        stored = self.repository.connection.execute(
+            "SELECT accepted,reachable,latency_ms,failure_reason FROM checks"
+        ).fetchone()
+        self.assertEqual(stored, (0, 1, 125, "url"))
+        history = self.repository.load_histories(
+            self.policy, retention_time=1000, restart_tolerance=20,
+            now_wall=110, now_mono=500,
+        )[result.key]
+        self.assertEqual(history.median_latency, 125)
+        self.assertFalse(history.samples[-1].accepted)
+
     def test_degraded_proxy_and_its_history_are_removed(self):
         result = ProxyResult("http", "1.2.3.4:80", True, 42, "France")
         self.repository.save_checks(
