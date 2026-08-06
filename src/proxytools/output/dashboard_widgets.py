@@ -92,24 +92,41 @@ class MonitorDataTable(DataTable):
 
     async def _on_click(self, event: events.Click) -> None:
         """Select a clicked row, or clear it when the same row is clicked again."""
-        meta = event.style.meta
-        row = meta.get("row")
-        column = meta.get("column")
-        data_cell = (
-            isinstance(row, int) and row >= 0
-            and isinstance(column, int) and column >= 0
-            and not meta.get("out_of_bounds", False)
-        )
-        if data_cell and self.show_cursor and row == self.cursor_row:
+        row = self._clicked_row(event.y)
+        if row is not None and event.chain >= 2:
+            self.cursor_coordinate = Coordinate(row, 0)
+            self.show_cursor = True
+            self.app.action_details()
+            event.stop()
+            return
+        if row is not None and self.show_cursor and row == self.cursor_row:
             self.app.action_clear_selection()
             event.stop()
             return
-        if data_cell and not self.show_cursor:
-            self.cursor_coordinate = Coordinate(row, column)
+        if row is not None:
+            self.cursor_coordinate = Coordinate(row, 0)
             self.show_cursor = True
-        elif not data_cell:
-            self.app.action_clear_selection()
+            event.stop()
+            return
+        self.app.action_clear_selection()
         await super()._on_click(event)
+
+    def _clicked_row(self, y: int) -> int | None:
+        """Resolve the full-width visual row at a widget-relative y coordinate."""
+        fixed_height = sum(
+            self.get_row_height(self._row_locations.get_key(index))
+            for index in range(self.fixed_rows)
+        )
+        if self.show_header:
+            fixed_height += self.header_height
+        virtual_y = y + int(self.scroll_y) if y >= fixed_height else y
+        try:
+            row_key, _line_offset = self._get_offsets(virtual_y)
+            if row_key == self._header_row_key:
+                return None
+            return self._row_locations.get(row_key)
+        except (IndexError, KeyError, LookupError):
+            return None
 
     def action_cursor_up(self):
         self.show_cursor = True
@@ -175,7 +192,6 @@ class AboutScreen(ModalScreen[None]):
     def action_close(self):
         self.dismiss(None)
 
-
 class ProxyDetailsScreen(ModalScreen[None]):
     """Full analytics for the proxy selected in the compact table."""
 
@@ -203,6 +219,11 @@ class ProxyDetailsScreen(ModalScreen[None]):
 
     def action_close(self):
         self.dismiss(None)
+
+    def on_click(self, event: events.Click):
+        if event.widget is self:
+            event.stop()
+            self.dismiss(None)
 
 
 class _ApplyingSelectionList(SelectionList):

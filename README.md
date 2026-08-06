@@ -159,6 +159,7 @@ When a URL is configured, pressing `b` opens that same address through the selec
 | `Esc` | Clear the current selection and keep the table at its current position |
 | `F1` | Show project information, version, and contributor credits |
 | `Enter` | Open detailed analytics for the selected proxy; `Enter` or `Esc` closes it |
+| Double-click | Open detailed analytics for the clicked proxy |
 | `s` | Choose visible statuses |
 | `p` | Choose visible protocols |
 | `c` | Search for and select a country |
@@ -177,7 +178,8 @@ Select a row and press `Enter` to open its complete analytics without leaving th
 - median latency, P95 latency, and jitter;
 - first observation and most recent failure times.
 
-Press `Enter` or `Esc` to close the detail window and return to the same table selection.
+Press `Enter` or `Esc`, or click the shaded area outside the detail window, to
+close it and return to the same table selection.
 
 ### Filter the table
 
@@ -195,9 +197,10 @@ Press `y` to copy the complete connection string, such as `socks5://198.51.100.2
 
 Press `b` to open the configured URL through the selected proxy in a disposable private browser session. If no `--url` or `URL` setting is configured, the browser opens a blank page so you can enter an address manually.
 The selection is cleared as the browser starts, so background updates do not
-scroll the monitor after the browser covers the terminal. Clicking the selected
-row again, an empty part of the table, or anywhere outside the table also clears
-it. Outside clicks continue to the control that was clicked. Without a
+scroll the monitor after the browser covers the terminal. Clicking anywhere on
+the selected row again, an empty part of the table below its rows, or anywhere
+outside the table also clears it. The full width of each row is clickable, not
+only its text. Outside clicks continue to the control that was clicked. Without a
 selection, `Enter`, `b`, and `y` do nothing except report that no proxy is
 selected.
 

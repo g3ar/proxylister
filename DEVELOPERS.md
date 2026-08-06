@@ -247,6 +247,11 @@ viewport. Snapshot updates and controlled resorts must not restore or follow
 the former proxy key until keyboard or mouse navigation selects a row again.
 Clicks on empty table space or outside the table also clear selection; an
 outside click must continue bubbling to the control that received it.
+Double-clicking a proxy selects that row and opens the same details modal as
+`Enter`. Only the proxy-details modal closes when its shaded backdrop is
+clicked; clicks inside the modal and other modal types retain their own rules.
+Mouse hit testing uses the visual row's vertical coordinate so its complete
+DataTable width remains clickable, including space beyond rendered cell text.
 
 The main table intentionally has one compact layout: State, Country, Median,
 Alive, and Connection. Detailed proxy analytics belong in the `Enter` modal,

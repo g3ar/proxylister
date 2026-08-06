@@ -94,6 +94,7 @@ Monitor controls currently include:
 - `Esc` — clear the current selection without moving the viewport;
 - `F1` — show project information and contributor credits;
 - `Enter` — show detailed analytics for the selected proxy;
+- double-click — select a proxy and show its detailed analytics;
 - `s` — choose states;
 - `p` — choose protocols;
 - `c` — choose country;
