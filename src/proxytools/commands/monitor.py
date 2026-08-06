@@ -7,7 +7,8 @@ uptime plus configurable count, rate, streak, latency, and jitter thresholds.
 Keyboard controls::
 
     q  quit                 p  pause display (checks continue)
-    s  toggle stable-only   c  filter by country
+    s  toggle stable-only   d  toggle degraded proxies
+    c  filter by country
     r  force next cycle     b  open selected proxy in a private browser
 
 Examples::

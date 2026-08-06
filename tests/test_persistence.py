@@ -37,6 +37,26 @@ class PersistenceTests(unittest.TestCase):
         self.assertEqual(self.repository.connection.execute("SELECT count(*) FROM checks").fetchone()[0], 2)
         self.assertEqual(self.repository.connection.execute("SELECT count(*) FROM state_transitions").fetchone()[0], 1)
 
+    def test_degraded_proxy_and_its_history_are_removed(self):
+        result = ProxyResult("http", "1.2.3.4:80", True, 42, "France")
+        self.repository.save_checks(
+            [CheckObservation(result, 100, True, "PROBATION", "STABLE")], 20
+        )
+        failed = ProxyResult("http", result.proxy, False)
+        self.repository.save_checks(
+            [CheckObservation(failed, 110, False, "STABLE", "DEGRADED")], 20
+        )
+        self.assertEqual(self.repository.connection.execute("SELECT count(*) FROM proxies").fetchone()[0], 0)
+        self.assertEqual(self.repository.connection.execute("SELECT count(*) FROM checks").fetchone()[0], 0)
+        self.assertEqual(self.repository.connection.execute("SELECT count(*) FROM state_transitions").fetchone()[0], 0)
+
+    def test_never_working_probation_proxy_is_not_persisted(self):
+        failed = ProxyResult("http", "1.2.3.4:80", False)
+        self.repository.save_checks(
+            [CheckObservation(failed, 100, False, "PROBATION", "PROBATION")], 20
+        )
+        self.assertEqual(self.repository.connection.execute("SELECT count(*) FROM proxies").fetchone()[0], 0)
+
     def test_long_restart_gap_resets_alive_but_keeps_rolling_checks(self):
         result = ProxyResult("http", "1.2.3.4:80", True, 42, "France")
         self.repository.save_checks(

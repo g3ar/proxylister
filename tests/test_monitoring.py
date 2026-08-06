@@ -87,7 +87,9 @@ class MonitorEngineTests(unittest.TestCase):
         with patch("proxytools.monitoring.check_url", return_value=True) as target_check:
             result = engine._check_candidate("http", "1.2.3.4:80")
         self.assertTrue(result.ok)
-        target_check.assert_called_once_with(result, "https://example.com", 3)
+        target_check.assert_called_once_with(
+            result, "https://example.com", 3, accept_forbidden=True
+        )
 
     def test_failed_browser_url_marks_complete_check_as_url_failure(self):
         engine = MonitorEngine(

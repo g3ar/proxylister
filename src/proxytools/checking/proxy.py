@@ -47,7 +47,19 @@ def check_proxy(protocol: str, proxy: str, timeout: float = 5, samples: int = 1)
     )
 
 
-def check_url(result: ProxyResult, url: str, timeout: float) -> bool:
+def check_url(
+    result: ProxyResult,
+    url: str,
+    timeout: float,
+    *,
+    accept_forbidden: bool = False,
+) -> bool:
+    """Check a target through a proxy without launching a browser.
+
+    Interactive-browser monitoring may accept HTTP 403 because anti-bot sites
+    commonly reject ``requests`` while allowing Chrome to complete a challenge.
+    Callers doing strict content validation retain the default behavior.
+    """
     conn = connection_string(result.protocol, result.proxy)
     try:
         response = session().get(
@@ -55,9 +67,18 @@ def check_url(result: ProxyResult, url: str, timeout: float) -> bool:
             proxies={"http": conn, "https": conn},
             timeout=timeout,
             stream=True,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+                ),
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            },
         )
         try:
-            return response.status_code < 400
+            return response.status_code < 400 or (
+                accept_forbidden and response.status_code == 403
+            )
         finally:
             response.close()
     except requests.RequestException:

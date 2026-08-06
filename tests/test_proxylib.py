@@ -49,6 +49,24 @@ class ProxyLibraryTests(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual(result.latency_ms, 200)
 
+    def test_monitor_url_check_accepts_antibot_403_but_not_404(self):
+        result = ProxyResult("http", "1.2.3.4:80", True, 50)
+        with patch.object(checker, "session") as session:
+            response = session.return_value.get.return_value
+            response.status_code = 403
+            self.assertFalse(checker.check_url(result, "https://example.com", 3))
+            self.assertTrue(
+                checker.check_url(
+                    result, "https://example.com", 3, accept_forbidden=True
+                )
+            )
+            response.status_code = 404
+            self.assertFalse(
+                checker.check_url(
+                    result, "https://example.com", 3, accept_forbidden=True
+                )
+            )
+
     def test_argument_validators_reject_bad_values(self):
         for value in ("0", "-1"):
             with self.assertRaises(argparse.ArgumentTypeError):

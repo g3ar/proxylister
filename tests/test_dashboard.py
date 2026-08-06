@@ -63,12 +63,21 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
                 checked=10,
                 total=10,
                 phase="waiting",
-                rows=(replace(row, median_latency=200), replace(second_row, median_latency=50)),
+                rows=(
+                    replace(row, state="PROBATION", median_latency=200),
+                    replace(second_row, state="DEGRADED", median_latency=50),
+                ),
             )
             app.receive_snapshot(sorted_snapshot)
-            self.assertEqual(table.get_row_at(0)[5], "50ms")
+            self.assertEqual(table.row_count, 1)
+            await pilot.press("d")
+            await pilot.pause(0.1)
+            self.assertTrue(app.show_degraded)
+            self.assertEqual(table.row_count, 2)
+            self.assertEqual(table.get_row_at(0)[0].plain, "PROBATION")
+            self.assertEqual(table.get_row_at(0)[5], "200ms")
             selected = table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value
-            self.assertEqual(selected, "http|5.6.7.8:80")
+            self.assertEqual(selected, "http|1.2.3.4:80")
             await pilot.press("c")
             await pilot.press(*"spain", "enter")
             await pilot.pause()
@@ -77,6 +86,12 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             country_input = app.query_one("#country-filter")
             country_input.value = "fran"
             await pilot.press("enter")
+            await pilot.pause()
+            self.assertEqual(app.query_one(DataTable).row_count, 1)
+            await pilot.press("s")
+            await pilot.pause()
+            self.assertEqual(app.query_one(DataTable).row_count, 0)
+            await pilot.press("s")
             await pilot.pause()
             self.assertEqual(app.query_one(DataTable).row_count, 1)
 

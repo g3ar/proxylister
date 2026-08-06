@@ -47,6 +47,8 @@ class MonitorSnapshot:
     phase: str
     next_cycle_in: int | None
     rows: tuple[MonitorRow, ...]
+    changed_rows: tuple[MonitorRow, ...] = ()
+    incremental: bool = False
 
 
 class MonitorEngine:
@@ -88,10 +90,16 @@ class MonitorEngine:
     def request_refresh(self):
         self._refresh_requested.set()
 
-    def snapshot(self, checked=0, total=0, phase="idle", next_cycle_in=None):
+    def snapshot(self, checked=0, total=0, phase="idle", next_cycle_in=None, changed_keys=None):
         now = time.monotonic()
+        changed_keys = set(changed_keys or ())
+        incremental = bool(changed_keys) and checked < total
+        histories = (
+            (self.histories[key] for key in changed_keys if key in self.histories)
+            if incremental else self.histories.values()
+        )
         rows = []
-        for history in self.histories.values():
+        for history in histories:
             if history.latest is None:
                 continue
             rows.append(
@@ -120,11 +128,10 @@ class MonitorEngine:
         rows.sort(
             key=lambda row: (
                 state_order[row.state],
-                -row.success_rate,
-                row.p95_latency if row.p95_latency is not None else float("inf"),
-                row.jitter,
+                row.median_latency if row.median_latency is not None else float("inf"),
             )
         )
+        row_tuple = tuple(rows)
         return MonitorSnapshot(
             cycle=self.cycle,
             checked=checked,
@@ -133,7 +140,9 @@ class MonitorEngine:
             tracked_count=len(self.histories),
             phase=phase,
             next_cycle_in=next_cycle_in,
-            rows=tuple(rows),
+            rows=row_tuple,
+            changed_rows=row_tuple if incremental else (),
+            incremental=incremental,
         )
 
     def run(self, stop: threading.Event, publish: Callable[[MonitorSnapshot], None]):
@@ -181,6 +190,7 @@ class MonitorEngine:
         """Check one ordered candidate batch and publish incremental progress."""
         checked = 0
         last_publish_at = 0.0
+        changed_keys = set()
         publish(self.snapshot(checked, len(candidates), phase))
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=self.workers)
         pending = {
@@ -200,9 +210,11 @@ class MonitorEngine:
                     history = self.histories.get(result.key)
                     if history is not None:
                         self._record_result(history, result)
+                        changed_keys.add(result.key)
                 publish_now = time.monotonic()
                 if done and (checked == len(candidates) or publish_now - last_publish_at >= 0.2):
-                    publish(self.snapshot(checked, len(candidates), phase))
+                    publish(self.snapshot(checked, len(candidates), phase, changed_keys=changed_keys))
+                    changed_keys.clear()
                     last_publish_at = publish_now
         finally:
             # Running requests cannot be force-cancelled safely. During
@@ -214,7 +226,9 @@ class MonitorEngine:
     def _check_candidate(self, protocol, proxy):
         """Run the normal proxy check and optional lightweight target request."""
         result = self.checker(protocol, proxy, self.timeout, self.samples)
-        if result.ok and self.target_url and not check_url(result, self.target_url, self.timeout):
+        if result.ok and self.target_url and not check_url(
+            result, self.target_url, self.timeout, accept_forbidden=True
+        ):
             result.ok = False
             result.failure_reason = "url"
         return result

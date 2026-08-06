@@ -22,6 +22,41 @@ def format_duration(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:02d}:{secs:02d}"
 
 
+class MonitorDataTable(DataTable):
+    """Data table that forwards monitor hotkeys instead of type-searching."""
+
+    BINDINGS = [*DataTable.BINDINGS] + [
+        Binding("q", "monitor_quit", "Quit"),
+        Binding("p", "monitor_pause", "Pause"),
+        Binding("s", "monitor_stable_only", "Stable only"),
+        Binding("d", "monitor_degraded", "Degraded"),
+        Binding("c", "monitor_country_filter", "Country"),
+        Binding("r", "monitor_refresh", "Refresh"),
+        Binding("b", "monitor_browser", "Browser"),
+    ]
+
+    def action_monitor_quit(self):
+        self.app.action_quit()
+
+    def action_monitor_pause(self):
+        self.app.action_pause()
+
+    def action_monitor_stable_only(self):
+        self.app.action_stable_only()
+
+    def action_monitor_degraded(self):
+        self.app.action_degraded()
+
+    def action_monitor_country_filter(self):
+        self.app.action_country_filter()
+
+    def action_monitor_refresh(self):
+        self.app.action_refresh()
+
+    def action_monitor_browser(self):
+        self.app.action_browser()
+
+
 class ProxyMonitorApp(App):
     """Full-screen, keyboard-driven proxy monitor."""
 
@@ -59,6 +94,7 @@ class ProxyMonitorApp(App):
         Binding("q", "quit", "Quit"),
         Binding("p", "pause", "Pause"),
         Binding("s", "stable_only", "Stable only"),
+        Binding("d", "degraded", "Degraded"),
         Binding("c", "country_filter", "Country"),
         Binding("r", "refresh", "Refresh"),
         Binding("b", "browser", "Browser"),
@@ -85,6 +121,7 @@ class ProxyMonitorApp(App):
         super().__init__()
         self.engine = engine
         self.stable_only = stable_only
+        self.show_degraded = False
         self.autostart = autostart
         self.paused = False
         self.country_filter = ""
@@ -92,24 +129,29 @@ class ProxyMonitorApp(App):
         self.latest_snapshot: MonitorSnapshot | None = None
         self.pending_snapshot: MonitorSnapshot | None = None
         self.rows_by_key: dict[str, MonitorRow] = {}
+        self.all_rows_by_key: dict[str, MonitorRow] = {}
         self.cells_by_key: dict[str, tuple] = {}
         self.completed_cycle = 0
         self.browser = browser
         self.browser_url = browser_url
         self.browser_process = None
         self.stopping = False
+        self.filter_rebuilding = False
+        self.filter_generation = 0
+        self.filter_pending_snapshot = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield Static("Starting monitor…", id="status")
         yield Input(placeholder="Country filter (empty = all countries)", id="country-filter")
-        yield DataTable(id="table", cursor_type="row", zebra_stripes=True)
+        yield MonitorDataTable(id="table", cursor_type="row", zebra_stripes=True)
         yield Static("Select a proxy to see stability details.", id="details")
         yield Footer()
 
     def on_mount(self):
         table = self.query_one("#table", DataTable)
         table.add_columns(*self.COLUMNS)
+        table.focus()
         if self.autostart:
             self.monitor_worker()
 
@@ -136,8 +178,19 @@ class ProxyMonitorApp(App):
 
     def receive_snapshot(self, snapshot: MonitorSnapshot):
         self.latest_snapshot = snapshot
+        if snapshot.incremental:
+            self.all_rows_by_key.update({
+                f"{row.key[0]}|{row.key[1]}": row for row in snapshot.changed_rows
+            })
+        else:
+            self.all_rows_by_key = {
+                f"{row.key[0]}|{row.key[1]}": row for row in snapshot.rows
+            }
         if self.paused:
             self.pending_snapshot = snapshot
+            return
+        if self.filter_rebuilding:
+            self.filter_pending_snapshot = snapshot
             return
         # Waiting snapshots only change the countdown and elapsed wall clock.
         # Rewriting thousands of table cells once a second starves keyboard
@@ -145,7 +198,43 @@ class ProxyMonitorApp(App):
         if snapshot.phase == "waiting" and self.completed_cycle == snapshot.cycle:
             self._render_status(snapshot, len(self.rows_by_key))
             return
+        if (
+            snapshot.incremental
+            and 0 < snapshot.checked < snapshot.total
+            and snapshot.phase in {"restoring", "checking_new", "checking"}
+        ):
+            self.render_changed_rows(snapshot)
+            return
         self.render_snapshot(snapshot)
+
+    def render_changed_rows(self, snapshot: MonitorSnapshot):
+        """Apply progress updates without walking every row in the table."""
+        table = self.query_one("#table", DataTable)
+        for row in snapshot.changed_rows:
+            key = f"{row.key[0]}|{row.key[1]}"
+            if not self._row_visible(row):
+                if key in self.rows_by_key:
+                    table.remove_row(key)
+                    self.rows_by_key.pop(key, None)
+                    self.cells_by_key.pop(key, None)
+                continue
+            cells = self._row_cells(row)
+            if key not in self.rows_by_key:
+                table.add_row(*cells, key=key)
+            else:
+                previous_cells = self.cells_by_key.get(key, ())
+                for index, ((_, column_key), value) in enumerate(zip(self.COLUMNS, cells)):
+                    if index >= len(previous_cells) or value != previous_cells[index]:
+                        table.update_cell(key, column_key, value, update_width=False)
+            self.rows_by_key[key] = row
+            self.cells_by_key[key] = cells
+        self._render_status(snapshot, len(self.rows_by_key))
+
+        if table.row_count:
+            selected = str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
+            changed = self.rows_by_key.get(selected)
+            if changed is not None and changed.key in {row.key for row in snapshot.changed_rows}:
+                self._render_details(changed)
 
     def render_snapshot(self, snapshot: MonitorSnapshot):
         table = self.query_one("#table", DataTable)
@@ -181,7 +270,7 @@ class ProxyMonitorApp(App):
             "restoring", "checking_new", "checking", "waiting"
         }
         if cycle_complete:
-            table.sort("median", key=self._latency_sort_key)
+            table.sort("state", "median", key=self._monitor_sort_key)
             self.completed_cycle = snapshot.cycle
             if selected_key in self.rows_by_key:
                 table.move_cursor(row=table.get_row_index(selected_key), animate=False)
@@ -200,7 +289,11 @@ class ProxyMonitorApp(App):
             "checking": f"Checking {snapshot.checked}/{snapshot.total}",
             "waiting": f"Next cycle in {snapshot.next_cycle_in}s",
         }.get(snapshot.phase, snapshot.phase.title())
-        filters = ["stable only" if self.stable_only else "all states"]
+        filters = [
+            "stable only"
+            if self.stable_only
+            else ("stable + probation + degraded" if self.show_degraded else "stable + probation")
+        ]
         if self.country_filter:
             filters.append(f"country contains '{self.country_filter}'")
         text = (
@@ -237,15 +330,20 @@ class ProxyMonitorApp(App):
     def action_pause(self):
         self.paused = not self.paused
         if not self.paused and self.pending_snapshot is not None:
-            snapshot, self.pending_snapshot = self.pending_snapshot, None
-            self.render_snapshot(snapshot)
+            self.pending_snapshot = None
+            self.schedule_filter_rebuild()
         elif self.latest_snapshot is not None:
             self._render_status(self.latest_snapshot, len(self.rows_by_key))
 
     def action_stable_only(self):
         self.stable_only = not self.stable_only
         if self.latest_snapshot is not None:
-            self.render_snapshot(self.latest_snapshot)
+            self.schedule_filter_rebuild()
+
+    def action_degraded(self):
+        self.show_degraded = not self.show_degraded
+        if self.latest_snapshot is not None:
+            self.schedule_filter_rebuild()
 
     def action_country_filter(self):
         country_input = self.query_one("#country-filter", Input)
@@ -266,7 +364,57 @@ class ProxyMonitorApp(App):
         event.input.display = False
         self.query_one("#table", DataTable).focus()
         if self.latest_snapshot is not None:
-            self.render_snapshot(self.latest_snapshot)
+            self.schedule_filter_rebuild()
+
+    def schedule_filter_rebuild(self):
+        """Rebuild a large filtered table in small event-loop-friendly chunks."""
+        self.filter_generation += 1
+        generation = self.filter_generation
+        self.filter_rebuilding = True
+        self.filter_pending_snapshot = None
+        self.query_one("#status", Static).update("Applying table filter…")
+        self.call_after_refresh(self._begin_filter_rebuild, generation)
+
+    def _begin_filter_rebuild(self, generation):
+        if generation != self.filter_generation or self.latest_snapshot is None:
+            return
+        table = self.query_one("#table", DataTable)
+        selected_key = None
+        if table.row_count:
+            selected_key = str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
+        rows = [row for row in self.all_rows_by_key.values() if self._row_visible(row)]
+        table.clear()
+        self.rows_by_key = {}
+        self.cells_by_key = {}
+        self._add_filter_chunk(generation, rows, 0, selected_key)
+
+    def _add_filter_chunk(self, generation, rows, offset, selected_key):
+        if generation != self.filter_generation:
+            return
+        table = self.query_one("#table", DataTable)
+        end = min(offset + 200, len(rows))
+        for row in rows[offset:end]:
+            key = f"{row.key[0]}|{row.key[1]}"
+            cells = self._row_cells(row)
+            table.add_row(*cells, key=key)
+            self.rows_by_key[key] = row
+            self.cells_by_key[key] = cells
+        if end < len(rows):
+            self.set_timer(0.01, lambda: self._add_filter_chunk(generation, rows, end, selected_key))
+            return
+
+        table.sort("state", "median", key=self._monitor_sort_key)
+        if selected_key in self.rows_by_key:
+            table.move_cursor(row=table.get_row_index(selected_key), animate=False)
+        self.filter_rebuilding = False
+        snapshot = self.filter_pending_snapshot or self.latest_snapshot
+        self.filter_pending_snapshot = None
+        self._render_status(snapshot, len(self.rows_by_key))
+        if table.row_count:
+            key = str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
+            self._render_details(self.rows_by_key[key])
+        else:
+            self.query_one("#details", Static).update("No proxies match the current filter.")
 
     def action_refresh(self):
         self.engine.request_refresh()
@@ -343,6 +491,14 @@ class ProxyMonitorApp(App):
             return float("inf")
         return int(str(value).removesuffix("ms"))
 
+    @classmethod
+    def _monitor_sort_key(cls, values):
+        state, latency = values
+        state_name = state.plain if isinstance(state, Text) else str(state)
+        state_name = state_name.removesuffix("*")
+        state_order = {"STABLE": 0, "PROBATION": 1, "DEGRADED": 2}
+        return state_order.get(state_name, 99), cls._latency_sort_key(latency)
+
     @staticmethod
     def _state_color(state):
         return {"STABLE": "green", "PROBATION": "yellow", "DEGRADED": "red"}[state]
@@ -367,10 +523,12 @@ class ProxyMonitorApp(App):
         )
 
     def filtered_rows(self, snapshot: MonitorSnapshot):
+        return [row for row in snapshot.rows if self._row_visible(row)]
+
+    def _row_visible(self, row):
         country_filter = self.country_filter.casefold()
-        return [
-            row
-            for row in snapshot.rows
-            if (not self.stable_only or row.state == "STABLE")
+        return (
+            (not self.stable_only or row.state == "STABLE")
+            and (self.stable_only or self.show_degraded or row.state != "DEGRADED")
             and (not country_filter or country_filter in row.country.casefold())
-        ]
+        )

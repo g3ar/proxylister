@@ -41,6 +41,7 @@ class StateRepository:
         self.connection.execute("PRAGMA foreign_keys=ON")
         self.connection.execute("PRAGMA busy_timeout=5000")
         self._create_schema()
+        self._discard_unusable_proxies()
 
     def _create_schema(self):
         self.connection.executescript(
@@ -93,6 +94,16 @@ class StateRepository:
         with self.connection:
             for item in observations:
                 result = item.result
+                if not item.accepted or item.new_state not in {"STABLE", "PROBATION"}:
+                    # SQLite is restart state, not a graveyard. Foreign keys
+                    # cascade detailed checks and transitions for a proxy that
+                    # is no longer usable; its in-memory history may still
+                    # recover and be inserted again later in this process.
+                    self.connection.execute(
+                        "DELETE FROM proxies WHERE protocol=? AND address=?",
+                        result.key,
+                    )
+                    continue
                 previous = self.connection.execute(
                     "SELECT id, last_checked_at, last_check_ok FROM proxies WHERE protocol=? AND address=?",
                     result.key,
@@ -140,6 +151,15 @@ class StateRepository:
                         "INSERT INTO state_transitions(proxy_id,changed_at,old_state,new_state,reason) VALUES(?,?,?,?,?)",
                         (proxy_id, item.checked_at, item.old_state, item.new_state, item.reason),
                     )
+
+    def _discard_unusable_proxies(self):
+        """Remove stale records written by versions that retained failures."""
+        with self.connection:
+            self.connection.execute(
+                """DELETE FROM proxies
+                   WHERE current_state NOT IN ('STABLE','PROBATION')
+                      OR last_check_ok IS NOT 1"""
+            )
 
     def load_histories(self, policy, retention_time: float, restart_tolerance: float, *, now_wall=None, now_mono=None):
         """Rebuild recent rolling histories without counting a long offline gap."""
