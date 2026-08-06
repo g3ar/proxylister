@@ -33,7 +33,7 @@ else
         list|monitor)
             shift
             ;;
-        help|-h|--help|--version|--about|--clear)
+        help|-h|--help|--version|--about|--abut|--clear)
             shift
             ;;
         -*)
@@ -61,7 +61,7 @@ case "$COMMAND" in
         show_help
         exit 0
         ;;
-    --version|--about)
+    --version|--about|--abut)
         ;;
     list)
         ;;

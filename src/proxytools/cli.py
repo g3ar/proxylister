@@ -45,6 +45,11 @@ def main(argv=None):
     if args and args[0] == "--about":
         print(format_about())
         return 0
+    if args and args[0] == "--abut":
+        from proxytools.easteregg import show
+
+        show()
+        return 0
     if args and args[0] == "--clear":
         from proxytools.cleanup import main as clear
 
