@@ -16,6 +16,9 @@ class ProxyResult:
     lon: float | None = None
     checked_at: str = ""
     failure_reason: str = ""
+    city: str = "Unknown"
+    exit_ip: str = ""
+    http_exit_ip: str = ""
 
     @property
     def key(self) -> tuple[str, str]:

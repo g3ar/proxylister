@@ -30,8 +30,8 @@ class MonitorDataTable(DataTable):
 
     BINDINGS = [*DataTable.BINDINGS] + [
         Binding("q", "monitor_quit", "Quit"),
-        Binding("p", "monitor_pause", "Pause"),
         Binding("s", "monitor_states", "States"),
+        Binding("p", "monitor_protocols", "Protocols"),
         Binding("c", "monitor_country_filter", "Country"),
         Binding("r", "monitor_refresh", "Refresh"),
         Binding("b", "monitor_browser", "Browser"),
@@ -40,11 +40,11 @@ class MonitorDataTable(DataTable):
     def action_monitor_quit(self):
         self.app.action_quit()
 
-    def action_monitor_pause(self):
-        self.app.action_pause()
-
     def action_monitor_states(self):
         self.app.action_states()
+
+    def action_monitor_protocols(self):
+        self.app.action_protocols()
 
     def action_monitor_country_filter(self):
         self.app.action_country_filter()
@@ -100,6 +100,56 @@ class StateFilterScreen(ModalScreen[set[str]]):
 
     def action_apply(self):
         self.dismiss(set(self.query_one(StateSelectionList).selected))
+
+    def action_cancel(self):
+        self.dismiss(self.initial)
+
+
+class ProtocolSelectionList(SelectionList):
+    """Selection list whose Enter key applies the protocol filter."""
+
+    BINDINGS = [
+        *SelectionList.BINDINGS,
+        Binding("enter", "apply_protocols", show=False, priority=True),
+    ]
+
+    def action_apply_protocols(self):
+        self.screen.action_apply()
+
+
+class ProtocolFilterScreen(ModalScreen[set[str]]):
+    """Multi-select modal containing protocols present in the monitor."""
+
+    DEFAULT_CSS = """
+    ProtocolFilterScreen { align: center middle; background: $background 60%; }
+    ProtocolFilterScreen > Vertical {
+        width: 44; height: auto; max-height: 18;
+        padding: 1 2; border: round $primary; background: $surface;
+    }
+    ProtocolFilterScreen SelectionList { height: 7; margin-top: 1; }
+    ProtocolFilterScreen .hint { color: $text-muted; margin-top: 1; }
+    """
+    BINDINGS = [
+        Binding("enter", "apply", "Apply"),
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(self, protocols, selected):
+        super().__init__()
+        self.protocols = tuple(protocols)
+        self.initial = set(selected)
+
+    def compose(self):
+        with Vertical():
+            yield Label("Proxy protocols")
+            yield ProtocolSelectionList(
+                *((protocol.upper(), protocol, protocol in self.initial) for protocol in self.protocols),
+                id="protocol-options",
+            )
+            yield Label("Space toggle  •  Enter apply  •  Esc cancel", classes="hint")
+
+    def action_apply(self):
+        self.dismiss(set(self.query_one(ProtocolSelectionList).selected))
 
     def action_cancel(self):
         self.dismiss(self.initial)
@@ -209,14 +259,11 @@ class ProxyMonitorApp(App):
         border-top: solid $primary;
         background: $surface;
     }
-    .paused {
-        background: $warning-darken-2;
-    }
     """
     BINDINGS = [
         Binding("q", "quit", "Quit"),
-        Binding("p", "pause", "Pause"),
         Binding("s", "states", "States"),
+        Binding("p", "protocols", "Protocols"),
         Binding("c", "country_filter", "Country"),
         Binding("r", "refresh", "Refresh"),
         Binding("b", "browser", "Browser"),
@@ -231,6 +278,8 @@ class ProxyMonitorApp(App):
         ("P95", "p95"),
         ("Jitter", "jitter"),
         ("Country", "country"),
+        ("City", "city"),
+        ("Exit IP", "exit_ip"),
         ("Blocked by", "blocked"),
         ("Connection", "connection"),
     )
@@ -242,12 +291,11 @@ class ProxyMonitorApp(App):
         super().__init__()
         self.engine = engine
         self.selected_states = {"STABLE"} if stable_only else {"STABLE", "PROBATION"}
+        self.selected_protocols = {"http", "socks4", "socks5"}
         self.autostart = autostart
-        self.paused = False
         self.country_filter = ""
         self.stop_event = threading.Event()
         self.latest_snapshot: MonitorSnapshot | None = None
-        self.pending_snapshot: MonitorSnapshot | None = None
         self.rows_by_key: dict[str, MonitorRow] = {}
         self.all_rows_by_key: dict[str, MonitorRow] = {}
         self.cells_by_key: dict[str, tuple] = {}
@@ -305,9 +353,6 @@ class ProxyMonitorApp(App):
             self.all_rows_by_key = {
                 f"{row.key[0]}|{row.key[1]}": row for row in snapshot.rows
             }
-        if self.paused:
-            self.pending_snapshot = snapshot
-            return
         if self.filter_rebuilding:
             self.filter_pending_snapshot = snapshot
             return
@@ -417,17 +462,15 @@ class ProxyMonitorApp(App):
         state_order = ("STABLE", "PROBATION", "DEGRADED")
         selected = [state.lower() for state in state_order if state in self.selected_states]
         filters = [f"states: {'+'.join(selected) or 'none'}"]
+        filters.append(f"protocols: {'+'.join(sorted(self.selected_protocols)) or 'none'}")
         if self.country_filter:
             filters.append(f"country: {self.country_filter}")
         text = (
             f"Cycle {snapshot.cycle} │ {phase} │ {snapshot.stable_count} stable │ "
             f"{snapshot.tracked_count} tracked │ {visible} visible │ {', '.join(filters)}"
         )
-        if self.paused:
-            text += " │ PAUSED (checks continue)"
         status = self.query_one("#status", Static)
         status.update(text)
-        status.set_class(self.paused, "paused")
 
     def _render_details(self, row: MonitorRow):
         blocked = ", ".join(row.blockers) or "none"
@@ -436,12 +479,15 @@ class ProxyMonitorApp(App):
         restored = "  [yellow]Restored from database; awaiting verification[/]" if row.restored else ""
         detail = Text.from_markup(
             f"[bold]{row.connection}[/bold]  [{self._state_color(row.state)}]{row.state}{'*' if row.restored else ''}[/]{restored}\n"
-            f"Country: {row.country}    Alive: {format_duration(row.alive_seconds)}    "
+            f"Country: {row.country}    City: {row.city}    Exit IP: {row.exit_ip or '-'}    "
+            f"Alive: {format_duration(row.alive_seconds)}    "
             f"Checks: {row.checks}/{row.required_checks}    Streak: {row.streak}    Success: {row.success_rate:.1%}\n"
             f"Median: {self._milliseconds(row.median_latency)}    P95: {self._milliseconds(row.p95_latency)}    "
             f"Jitter: {row.jitter}ms    Blocked by: {blocked}\n"
             f"First seen: {first_seen}    Observed uptime: {format_duration(row.total_observed_uptime)}    "
-            f"Last failure: {last_failure}"
+            f"Last failure: {last_failure}\n"
+            f"HTTP exit: {row.http_exit_ip or '-'}    HTTPS exit: {row.exit_ip or '-'}    "
+            f"Route: {'split' if row.http_exit_ip and row.exit_ip and row.http_exit_ip != row.exit_ip else 'same/unknown'}"
         )
         self.query_one("#details", Static).update(detail)
 
@@ -450,19 +496,27 @@ class ProxyMonitorApp(App):
         if row is not None:
             self._render_details(row)
 
-    def action_pause(self):
-        self.paused = not self.paused
-        if not self.paused and self.pending_snapshot is not None:
-            self.pending_snapshot = None
-            self.schedule_filter_rebuild()
-        elif self.latest_snapshot is not None:
-            self._render_status(self.latest_snapshot, len(self.rows_by_key))
-
     def action_states(self):
         self.push_screen(StateFilterScreen(self.selected_states), self.apply_state_filter)
 
     def apply_state_filter(self, selected):
         self.selected_states = set(selected)
+        if self.latest_snapshot is not None:
+            self.schedule_filter_rebuild()
+
+    def action_protocols(self):
+        order = {"http": 0, "socks4": 1, "socks5": 2}
+        protocols = sorted(
+            {row.key[0] for row in self.all_rows_by_key.values()},
+            key=lambda protocol: (order.get(protocol, 99), protocol),
+        )
+        self.push_screen(
+            ProtocolFilterScreen(protocols, self.selected_protocols),
+            self.apply_protocol_filter,
+        )
+
+    def apply_protocol_filter(self, selected):
+        self.selected_protocols = set(selected)
         if self.latest_snapshot is not None:
             self.schedule_filter_rebuild()
 
@@ -634,6 +688,8 @@ class ProxyMonitorApp(App):
             self._milliseconds(row.p95_latency),
             f"{row.jitter}ms",
             row.country,
+            row.city,
+            row.exit_ip or "-",
             ",".join(row.blockers) or "-",
             row.connection,
         )
@@ -645,5 +701,6 @@ class ProxyMonitorApp(App):
         country_filter = self.country_filter.casefold()
         return (
             row.state in self.selected_states
+            and row.key[0] in self.selected_protocols
             and (not country_filter or country_filter == row.country.casefold())
         )

@@ -8,7 +8,7 @@ import threading
 import time
 from typing import Callable
 
-from proxytools.checking import check_proxy, check_url, connection_string
+from proxytools.checking import check_proxy, check_url, connection_string, probe_https_route
 from proxytools.sources.proxyscrape import fetch_all_proxies
 from proxytools.stability import StabilityPolicy
 from proxytools.stability.history import update_advertised
@@ -35,6 +35,9 @@ class MonitorRow:
     last_failure_at: float | None = None
     last_checked_at: float | None = None
     restored: bool = False
+    city: str = "Unknown"
+    exit_ip: str = ""
+    http_exit_ip: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +134,9 @@ class MonitorEngine:
                     last_failure_at=history.last_failure_at,
                     last_checked_at=history.samples[-1].checked_at if history.samples else None,
                     restored=history.restored,
+                    city=history.latest.city,
+                    exit_ip=history.latest.exit_ip,
+                    http_exit_ip=history.latest.http_exit_ip,
                 )
             )
         state_order = {"STABLE": 0, "PROBATION": 1, "DEGRADED": 2}
@@ -311,11 +317,13 @@ class MonitorEngine:
     def _check_candidate(self, protocol, proxy):
         """Run the normal proxy check and optional lightweight target request."""
         result = self.checker(protocol, proxy, self.timeout, self.samples)
-        if result.ok and self.target_url and not check_url(
-            result, self.target_url, self.timeout, accept_forbidden=True
-        ):
-            result.ok = False
-            result.failure_reason = "url"
+        if result.ok and self.target_url:
+            probe_https_route(result, self.timeout)
+            if not check_url(
+                result, self.target_url, self.timeout, accept_forbidden=True
+            ):
+                result.ok = False
+                result.failure_reason = "url"
         return result
 
     def _record_result(self, history, result):

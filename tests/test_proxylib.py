@@ -23,6 +23,9 @@ class FakeResponse:
     def json(self):
         return self._payload
 
+    def close(self):
+        pass
+
 
 class ProxyLibraryTests(unittest.TestCase):
     def test_fetch_proxy_list_extracts_and_dedupes(self):
@@ -48,6 +51,35 @@ class ProxyLibraryTests(unittest.TestCase):
             result = checker.check_proxy("http", "1.2.3.4:80", samples=3)
         self.assertTrue(result.ok)
         self.assertEqual(result.latency_ms, 200)
+
+    def test_https_route_probe_replaces_displayed_exit_location(self):
+        result = ProxyResult(
+            "http",
+            "1.2.3.4:80",
+            True,
+            50,
+            country="Hong Kong",
+            city="Hong Kong",
+            exit_ip="198.51.100.10",
+            http_exit_ip="198.51.100.10",
+        )
+        response = FakeResponse(
+            payload={
+                "success": True,
+                "ip": "203.0.113.20",
+                "country": "Germany",
+                "city": "Nuremberg",
+                "latitude": 49.45,
+                "longitude": 11.08,
+            }
+        )
+        with patch.object(checker, "session") as session:
+            session.return_value.get.return_value = response
+            self.assertTrue(checker.probe_https_route(result, 3))
+
+        self.assertEqual(result.http_exit_ip, "198.51.100.10")
+        self.assertEqual(result.exit_ip, "203.0.113.20")
+        self.assertEqual((result.country, result.city), ("Germany", "Nuremberg"))
 
     def test_monitor_url_check_accepts_antibot_403_but_not_404(self):
         result = ProxyResult("http", "1.2.3.4:80", True, 50)

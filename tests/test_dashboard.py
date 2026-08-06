@@ -4,7 +4,7 @@ from dataclasses import replace
 from textual.widgets import DataTable, SelectionList, Static
 
 from proxytools.monitoring import MonitorEngine, MonitorRow, MonitorSnapshot
-from proxytools.output.dashboard import ProxyMonitorApp
+from proxytools.output.dashboard import ProtocolSelectionList, ProxyMonitorApp
 from proxytools.stability import StabilityConfig, StabilityPolicy
 
 
@@ -44,9 +44,9 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Blocked by: alive, checks", str(app.query_one("#details", Static).content))
             second_row = replace(
                 row,
-                key=("http", "5.6.7.8:80"),
+                key=("socks5", "5.6.7.8:80"),
                 country="Germany",
-                connection="http://5.6.7.8:80",
+                connection="socks5://5.6.7.8:80",
             )
             two_rows = replace(snapshot, rows=(row, second_row), tracked_count=2)
             app.receive_snapshot(two_rows)
@@ -57,7 +57,7 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(table.cursor_row, 1)
             selected = table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value
-            self.assertEqual(selected, "http|5.6.7.8:80")
+            self.assertEqual(selected, "socks5|5.6.7.8:80")
             sorted_snapshot = replace(
                 two_rows,
                 checked=10,
@@ -86,6 +86,13 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause(0.1)
             self.assertEqual(app.country_filter, "France")
             self.assertEqual(app.query_one(DataTable).row_count, 1)
+            await pilot.press("p")
+            protocol_options = app.screen.query_one(ProtocolSelectionList)
+            protocol_options.deselect("socks5")
+            await pilot.press("enter")
+            await pilot.pause(0.1)
+            self.assertEqual(app.selected_protocols, {"http"})
+            self.assertEqual(app.query_one(DataTable).row_count, 1)
             await pilot.press("s")
             state_options = app.screen.query_one(SelectionList)
             state_options.deselect("STABLE").deselect("PROBATION").select("DEGRADED")
@@ -95,6 +102,12 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             await pilot.press("c", "enter")
             await pilot.pause(0.1)
             self.assertEqual(app.country_filter, "")
+            self.assertEqual(app.query_one(DataTable).row_count, 0)
+            await pilot.press("p")
+            app.screen.query_one(ProtocolSelectionList).select("socks5")
+            await pilot.press("enter")
+            await pilot.pause(0.1)
+            self.assertEqual(app.selected_protocols, {"http", "socks5"})
             self.assertEqual(app.query_one(DataTable).row_count, 1)
 
 

@@ -53,6 +53,9 @@ class StateRepository:
                 protocol TEXT NOT NULL,
                 address TEXT NOT NULL,
                 country TEXT NOT NULL DEFAULT 'Unknown',
+                city TEXT NOT NULL DEFAULT 'Unknown',
+                exit_ip TEXT NOT NULL DEFAULT '',
+                http_exit_ip TEXT NOT NULL DEFAULT '',
                 lat REAL, lon REAL,
                 first_seen_at REAL NOT NULL,
                 last_seen_at REAL NOT NULL,
@@ -127,12 +130,15 @@ class StateRepository:
                 self.connection.execute(
                     """
                     INSERT INTO proxies (
-                        protocol,address,country,lat,lon,first_seen_at,last_seen_at,last_checked_at,
+                        protocol,address,country,city,exit_ip,http_exit_ip,lat,lon,first_seen_at,last_seen_at,last_checked_at,
                         last_success_at,last_failure_at,last_check_ok,total_successes,total_failures,
                         total_observed_uptime,current_state,failure_since
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     ON CONFLICT(protocol,address) DO UPDATE SET
                         country=CASE WHEN excluded.country != 'Unknown' THEN excluded.country ELSE proxies.country END,
+                        city=CASE WHEN excluded.city != 'Unknown' THEN excluded.city ELSE proxies.city END,
+                        exit_ip=CASE WHEN excluded.exit_ip != '' THEN excluded.exit_ip ELSE proxies.exit_ip END,
+                        http_exit_ip=CASE WHEN excluded.http_exit_ip != '' THEN excluded.http_exit_ip ELSE proxies.http_exit_ip END,
                         lat=COALESCE(excluded.lat,proxies.lat), lon=COALESCE(excluded.lon,proxies.lon),
                         last_seen_at=excluded.last_seen_at, last_checked_at=excluded.last_checked_at,
                         last_success_at=COALESCE(excluded.last_success_at,proxies.last_success_at),
@@ -144,7 +150,8 @@ class StateRepository:
                         current_state=excluded.current_state,
                         failure_since=excluded.failure_since
                     """,
-                    (result.protocol, result.proxy, result.country, result.lat, result.lon,
+                    (result.protocol, result.proxy, result.country, result.city,
+                     result.exit_ip, result.http_exit_ip, result.lat, result.lon,
                      item.checked_at, item.checked_at, item.checked_at, success_at, failure_at,
                      int(item.accepted), int(item.accepted), int(not item.accepted), uptime,
                      item.new_state, item.failure_since),
@@ -180,6 +187,17 @@ class StateRepository:
         if "failure_since" not in columns:
             with self.connection:
                 self.connection.execute("ALTER TABLE proxies ADD COLUMN failure_since REAL")
+        additions = {
+            "city": "TEXT NOT NULL DEFAULT 'Unknown'",
+            "exit_ip": "TEXT NOT NULL DEFAULT ''",
+            "http_exit_ip": "TEXT NOT NULL DEFAULT ''",
+        }
+        with self.connection:
+            for name, definition in additions.items():
+                if name not in columns:
+                    self.connection.execute(
+                        f"ALTER TABLE proxies ADD COLUMN {name} {definition}"
+                    )
 
     def load_histories(self, policy, retention_time: float, restart_tolerance: float, *, now_wall=None, now_mono=None):
         """Rebuild recent rolling histories without counting a long offline gap."""
@@ -187,13 +205,14 @@ class StateRepository:
         now_mono = time.monotonic() if now_mono is None else now_mono
         histories = {}
         proxies = self.connection.execute(
-            """SELECT id,protocol,address,country,lat,lon,first_seen_at,total_observed_uptime,
+            """SELECT id,protocol,address,country,city,exit_ip,http_exit_ip,lat,lon,first_seen_at,total_observed_uptime,
                       last_failure_at,last_checked_at,last_check_ok,current_state,failure_since
                FROM proxies ORDER BY
                    CASE current_state WHEN 'STABLE' THEN 0 WHEN 'DEGRADED' THEN 1 ELSE 2 END,
                    last_checked_at DESC"""
         ).fetchall()
-        for (proxy_id, protocol, address, country, lat, lon, first_seen, uptime,
+        for (proxy_id, protocol, address, country, city, exit_ip, http_exit_ip,
+             lat, lon, first_seen, uptime,
              last_failure, last_checked, last_check_ok, stored_state, failure_since) in proxies:
             history = ProxyHistory(protocol, address, policy.config.history_size)
             history.first_seen_at = first_seen
@@ -212,8 +231,13 @@ class StateRepository:
                 history.record(result, synthetic_now, policy)
             if history.latest is None:
                 history.latest = ProxyResult(
-                    protocol, address, bool(last_check_ok), None, country, lat, lon
+                    protocol, address, bool(last_check_ok), None, country, lat, lon,
+                    city=city, exit_ip=exit_ip, http_exit_ip=http_exit_ip,
                 )
+            else:
+                history.latest.city = city
+                history.latest.exit_ip = exit_ip
+                history.latest.http_exit_ip = http_exit_ip
             history.last_advertised_at = now_mono
             if last_checked is None or now_wall - last_checked > restart_tolerance:
                 history.alive_since = None
