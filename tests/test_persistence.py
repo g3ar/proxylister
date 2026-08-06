@@ -6,6 +6,7 @@ from proxytools.models import ProxyResult
 from proxytools.process_lock import AlreadyRunning, ProcessLock
 from proxytools.stability import StabilityConfig, StabilityPolicy
 from proxytools.storage import CheckObservation, StateRepository
+from proxytools.storage.sqlite import SCHEMA_VERSION
 
 
 class PersistenceTests(unittest.TestCase):
@@ -36,6 +37,10 @@ class PersistenceTests(unittest.TestCase):
         self.assertEqual(row, (2, 10.0, "STABLE"))
         self.assertEqual(self.repository.connection.execute("SELECT count(*) FROM checks").fetchone()[0], 2)
         self.assertEqual(self.repository.connection.execute("SELECT count(*) FROM state_transitions").fetchone()[0], 1)
+
+    def test_database_records_current_schema_version(self):
+        version = self.repository.connection.execute("PRAGMA user_version").fetchone()[0]
+        self.assertEqual(version, SCHEMA_VERSION)
 
     def test_degraded_proxy_and_its_history_are_removed(self):
         result = ProxyResult("http", "1.2.3.4:80", True, 42, "France")

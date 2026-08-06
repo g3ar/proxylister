@@ -16,15 +16,14 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
-import os
 import sys
 
-from proxytools.checking import check_proxy, check_url, connection_string, probe_https_route
+from proxytools.checking import check_proxy, check_url, connection_string
 from proxytools.checking.browser import MIN_PAGE_LOAD_TIMEOUT, browser_check
 from proxytools.config import load_config, positive_float, web_url
 from proxytools.models import ProxyResult
 from proxytools.output.console import console, progress_display
-from proxytools.output.serializers import filter_and_sort, format_result
+from proxytools.output.results import filter_and_sort, format_result
 from proxytools.sources.proxyscrape import fetch_all_proxies
 
 
@@ -54,12 +53,9 @@ def validate_args(parser, args):
 
 
 def check_candidate(protocol, proxy, timeout, samples, url):
-    """Run browser-like identity and optional target checks without Selenium."""
+    """Run HTTPS identity and optional target checks without Selenium."""
     result = check_proxy(protocol, proxy, timeout, samples)
-    if result.ok and not probe_https_route(result, timeout):
-        result.ok = False
-        result.failure_reason = "https"
-    elif result.ok and url and not check_url(
+    if result.ok and url and not check_url(
         result, url, timeout, accept_forbidden=True
     ):
         result.ok = False
@@ -122,14 +118,17 @@ def main(argv=None):
         console.print(f"[bold green]{len(working)}[/bold green]/{len(entries)} proxies are working.")
     except KeyboardInterrupt:
         interrupted = True
-        console.print(f"[yellow]Interrupted — saving {len(working)} completed results.[/yellow]")
+        console.print(
+            f"[yellow]Interrupted — cancelling queued checks and waiting for active requests; "
+            f"{len(working)} results collected.[/yellow]"
+        )
     except RuntimeError as exc:
         interrupted = True
         console.print(f"[bold red]Error:[/bold red] {exc}", stderr=True)
     finally:
-        network_pool.shutdown(wait=not interrupted, cancel_futures=True)
+        network_pool.shutdown(wait=True, cancel_futures=interrupted)
         if browser_pool:
-            browser_pool.shutdown(wait=not interrupted, cancel_futures=True)
+            browser_pool.shutdown(wait=True, cancel_futures=interrupted)
 
     selected = filter_and_sort(verified if args.browser_check else valid, args.max_latency)
     qualifier = "browser-verified" if args.browser_check else f"faster than {args.max_latency:g}ms"
@@ -139,7 +138,4 @@ def main(argv=None):
             format_result(result) if args.debug else connection_string(result.protocol, result.proxy),
             file=sys.stdout,
         )
-    if interrupted:
-        sys.stdout.flush()
-        os._exit(0)
     return 0

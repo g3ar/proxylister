@@ -1,5 +1,0 @@
-requests[socks]
-maxminddb>=2.6
-selenium>=4.10
-rich>=14
-textual>=1.0

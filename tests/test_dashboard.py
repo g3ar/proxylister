@@ -4,7 +4,8 @@ from dataclasses import replace
 from textual.widgets import DataTable, SelectionList, Static
 
 from proxytools.monitoring import MonitorEngine, MonitorRow, MonitorSnapshot
-from proxytools.output.dashboard import ProtocolSelectionList, ProxyMonitorApp
+from proxytools.output.dashboard import ProxyMonitorApp
+from proxytools.output.dashboard_widgets import ProtocolSelectionList
 from proxytools.stability import StabilityConfig, StabilityPolicy
 
 

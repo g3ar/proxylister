@@ -23,7 +23,7 @@ cd proxylister
 ./proxytools --help
 ```
 
-On the first real command, `./proxytools` creates an ignored `.venv` and installs all Python dependencies automatically. Selenium is imported and invoked only when `list --browser-check` is requested. Python 3 with the standard `venv` module must be available on the host.
+On the first real command, `./proxytools` creates an ignored `.venv` and installs the project and all dependencies declared in `pyproject.toml`. That file is the single dependency manifest. Selenium is imported and invoked only when `list --browser-check` is requested. Python 3 with the standard `venv` module must be available on the host.
 
 `./proxytools` is the only supported user-facing entrypoint:
 
@@ -90,7 +90,7 @@ During long-running monitoring, checks use two independent lanes. Roughly 20% of
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--max-latency` | Only admit proxies faster than this (ms) | `MAX_LATENCY` |
-| `--debug` | Show City, Exit IP, Blocked by, and route diagnostics | off |
+| `--debug` | Show City, Exit IP, and Blocked by diagnostics | off |
 | `--url` | HTTP(S) URL every proxy must reach; also opened by `b` | `URL` |
 
 **Controls:** arrow keys select and scroll rows, `q` quits, `s` opens a multi-select state picker, `p` opens a multi-select protocol picker, `c` opens a searchable country picker, and `b` opens the selected proxy in a disposable private browser session. By default the table shows stable and probationary proxies while degraded proxies are hidden. State, protocol, and exact-country filters combine; choose `All countries` to clear the country filter. Rows update in place while checks run and are reordered only after an active-pool pass completes. Textual's footer always shows the active bindings.
@@ -99,7 +99,7 @@ The browser action uses `MONITOR_BROWSER` from the config. In `auto` mode it det
 
 When `URL` is configured or `--url` is supplied, every otherwise successful proxy check makes one additional lightweight `requests` request to that URL through the same proxy. HTTP 2xx/3xx passes. Monitor also accepts HTTP 403 because anti-bot sites may reject `requests` while remaining usable in the interactive browser; other 4xx/5xx responses, timeout, TLS, proxy, and redirect errors fail with the `url` blocker. This happens once after the configured proxy samples and never invokes Selenium. Without a URL there is no target request and `b` opens `about:blank`.
 
-The Textual table is scrollable, supports row selection, and updates a detail panel for the highlighted proxy. Its default view shows state, country, continuous live time, total observed uptime, first seen and last failure times, check count, success streak, rolling success rate, median latency, p95 latency, jitter, and connection string. `--debug` additionally shows City, Exit IP, `Blocked by`, and HTTP/HTTPS route diagnostics. Every successful base check must also complete an HTTPS identity request through the proxy; its exit IP is therefore the route a browser will use. Country, city, and coordinates are resolved locally from that exit IP rather than accepted from a remote GeoIP API. `Blocked by` explains why a row is not yet stable: `alive`, `checks`, `rate`, `streak`, `latency`, `jitter`, `https`, or `failed`. A status bar reports the current phase, cycle progress, tracked/stable counts, and active filters. A proxy that disappears from ProxyScrape continues to be checked until `MONITOR_RETENTION_TIME` expires.
+The Textual table is scrollable, supports row selection, and updates a detail panel for the highlighted proxy. Its default view shows state, country, continuous live time, total observed uptime, first seen and last failure times, check count, success streak, rolling success rate, median latency, p95 latency, jitter, and connection string. `--debug` additionally shows City, Exit IP, and `Blocked by`. Each base sample makes one HTTPS request to the neutral `api.ipify.org` identity endpoint through the proxy. The returned exit IP is therefore measured on the same HTTPS route a browser uses, while country, city, and coordinates are resolved locally rather than accepted from the identity service. `Blocked by` explains why a row is not yet stable: `alive`, `checks`, `rate`, `streak`, `latency`, `jitter`, `url`, or `failed`. A status bar reports the current phase, cycle progress, tracked/stable counts, and active filters. A proxy that disappears from ProxyScrape continues to be checked until `MONITOR_RETENTION_TIME` expires.
 
 On each real `list` or `monitor` start, Proxy Tools checks the monthly DB-IP City Lite database stored as `proxytools-geoip.mmdb` beside the launcher. A missing or outdated database is downloaded over HTTPS, validated, decompressed, and atomically replaced; both the database and its version marker are ignored by Git. If an update fails, the existing database remains usable. With no local database, checks continue and locations are reported as `Unknown`. GeoIP data attribution: [IP Geolocation by DB-IP](https://db-ip.com).
 
@@ -133,8 +133,8 @@ src/proxytools/
   browser.py               disposable interactive browser launcher
   browser_session.py       detached temporary-profile lifecycle helper
   stability/               rolling history and stability policy
-  storage/                 SQLite schema, restoration, and batched persistence
-  output/                  Rich console output, serializers, and Textual dashboard
+  storage/                 versioned SQLite schema, restoration, and persistence
+  output/                  list formatting and split Textual dashboard widgets
   process_lock.py          per-clone kernel process lock
   paths.py                 clone-local runtime path resolution
   models.py                shared domain records

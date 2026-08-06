@@ -1,4 +1,11 @@
-"""Filtering and optional detailed text formatting for list results."""
+"""Prepare successful proxy checks for ``list`` command output.
+
+Normal CLI output is emitted directly as connection strings by the command.
+This module contains the remaining presentation policy: latency filtering,
+fastest-first ordering, and the verbose one-line representation selected by
+``--debug``. It performs no file I/O, so shell redirection remains the single
+simple way to save or pipe results.
+"""
 
 from __future__ import annotations
 

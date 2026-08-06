@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "proxytools"
-version = "0.1.0"
+dynamic = ["version"]
 description = "CLI tools for discovering and monitoring public proxies"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -16,3 +16,6 @@ proxytools = "proxytools.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.dynamic]
+version = {attr = "proxytools.__version__"}

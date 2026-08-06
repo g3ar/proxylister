@@ -44,44 +44,18 @@ class ProxyLibraryTests(unittest.TestCase):
             )
 
     def test_check_proxy_uses_median_complete_duration(self):
-        response = FakeResponse(payload={"status": "success", "country": "A", "lat": 1, "lon": 2})
+        response = FakeResponse(payload={"ip": "203.0.113.20"})
         with patch.object(checker, "session") as session, patch.object(
+            checker, "locate", return_value={
+                "country": "Germany", "city": "Nuremberg", "lat": 49.45, "lon": 11.08,
+            }
+        ), patch.object(
             checker.time, "perf_counter", side_effect=[0.0, 0.3, 1.0, 1.1, 2.0, 2.2]
         ):
             session.return_value.get.return_value = response
             result = checker.check_proxy("http", "1.2.3.4:80", samples=3)
         self.assertTrue(result.ok)
         self.assertEqual(result.latency_ms, 200)
-
-    def test_https_route_probe_replaces_displayed_exit_location(self):
-        result = ProxyResult(
-            "http",
-            "1.2.3.4:80",
-            True,
-            50,
-            country="Hong Kong",
-            city="Hong Kong",
-            exit_ip="198.51.100.10",
-            http_exit_ip="198.51.100.10",
-        )
-        response = FakeResponse(
-            payload={
-                "success": True,
-                "ip": "203.0.113.20",
-                "country": "Germany",
-                "city": "Nuremberg",
-                "latitude": 49.45,
-                "longitude": 11.08,
-            }
-        )
-        with patch.object(checker, "locate", return_value={
-            "country": "Germany", "city": "Nuremberg",
-            "lat": 49.45, "lon": 11.08,
-        }), patch.object(checker, "session") as session:
-            session.return_value.get.return_value = response
-            self.assertTrue(checker.probe_https_route(result, 3))
-
-        self.assertEqual(result.http_exit_ip, "198.51.100.10")
         self.assertEqual(result.exit_ip, "203.0.113.20")
         self.assertEqual((result.country, result.city), ("Germany", "Nuremberg"))
 
@@ -103,16 +77,16 @@ class ProxyLibraryTests(unittest.TestCase):
                 )
             )
 
-    def test_list_candidate_uses_https_identity_and_lightweight_url_check(self):
+    def test_list_candidate_uses_identity_result_and_lightweight_url_check(self):
         result = ProxyResult("http", "1.2.3.4:80", True, 50)
-        with patch.object(list_command, "check_proxy", return_value=result), patch.object(
-            list_command, "probe_https_route", return_value=True
-        ) as identity, patch.object(list_command, "check_url", return_value=True) as target:
+        with patch.object(list_command, "check_proxy", return_value=result) as identity, patch.object(
+            list_command, "check_url", return_value=True
+        ) as target:
             checked = list_command.check_candidate(
                 "http", "1.2.3.4:80", 3, 1, "https://example.com"
             )
         self.assertIs(checked, result)
-        identity.assert_called_once_with(result, 3)
+        identity.assert_called_once_with("http", "1.2.3.4:80", 3, 1)
         target.assert_called_once_with(
             result, "https://example.com", 3, accept_forbidden=True
         )

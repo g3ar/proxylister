@@ -2,8 +2,8 @@ import unittest
 
 from proxytools.config import web_url
 from proxytools.models import ProxyResult
-from proxytools.output.dashboard import format_duration
-from proxytools.output.serializers import filter_and_sort
+from proxytools.output.dashboard_widgets import format_duration
+from proxytools.output.results import filter_and_sort
 from proxytools.stability import ProxyHistory, StabilityConfig, StabilityPolicy
 from proxytools.stability.history import expire_histories, update_advertised
 

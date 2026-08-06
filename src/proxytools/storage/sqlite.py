@@ -17,6 +17,8 @@ import time
 from proxytools.models import ProxyResult
 from proxytools.stability.history import ProxyHistory
 
+SCHEMA_VERSION = 1
+
 
 @dataclass(frozen=True, slots=True)
 class CheckObservation:
@@ -42,7 +44,7 @@ class StateRepository:
         self.connection.execute("PRAGMA foreign_keys=ON")
         self.connection.execute("PRAGMA busy_timeout=5000")
         self._create_schema()
-        self._ensure_runtime_columns()
+        self._migrate_schema()
         self._discard_unusable_proxies()
 
     def _create_schema(self):
@@ -55,7 +57,6 @@ class StateRepository:
                 country TEXT NOT NULL DEFAULT 'Unknown',
                 city TEXT NOT NULL DEFAULT 'Unknown',
                 exit_ip TEXT NOT NULL DEFAULT '',
-                http_exit_ip TEXT NOT NULL DEFAULT '',
                 lat REAL, lon REAL,
                 first_seen_at REAL NOT NULL,
                 last_seen_at REAL NOT NULL,
@@ -132,15 +133,14 @@ class StateRepository:
                 self.connection.execute(
                     """
                     INSERT INTO proxies (
-                        protocol,address,country,city,exit_ip,http_exit_ip,lat,lon,first_seen_at,last_seen_at,last_checked_at,
+                        protocol,address,country,city,exit_ip,lat,lon,first_seen_at,last_seen_at,last_checked_at,
                         last_success_at,last_failure_at,last_check_ok,total_successes,total_failures,
                         total_observed_uptime,current_state,failure_since,was_stable
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     ON CONFLICT(protocol,address) DO UPDATE SET
                         country=CASE WHEN excluded.country != 'Unknown' THEN excluded.country ELSE proxies.country END,
                         city=CASE WHEN excluded.city != 'Unknown' THEN excluded.city ELSE proxies.city END,
                         exit_ip=CASE WHEN excluded.exit_ip != '' THEN excluded.exit_ip ELSE proxies.exit_ip END,
-                        http_exit_ip=CASE WHEN excluded.http_exit_ip != '' THEN excluded.http_exit_ip ELSE proxies.http_exit_ip END,
                         lat=COALESCE(excluded.lat,proxies.lat), lon=COALESCE(excluded.lon,proxies.lon),
                         last_seen_at=excluded.last_seen_at, last_checked_at=excluded.last_checked_at,
                         last_success_at=COALESCE(excluded.last_success_at,proxies.last_success_at),
@@ -154,7 +154,7 @@ class StateRepository:
                         was_stable=MAX(proxies.was_stable,excluded.was_stable)
                     """,
                     (result.protocol, result.proxy, result.country, result.city,
-                     result.exit_ip, result.http_exit_ip, result.lat, result.lon,
+                     result.exit_ip, result.lat, result.lon,
                      item.checked_at, item.checked_at, item.checked_at, success_at, failure_at,
                      int(item.accepted), int(item.accepted), int(not item.accepted), uptime,
                      item.new_state, item.failure_since, int(item.new_state == "STABLE")),
@@ -184,18 +184,25 @@ class StateRepository:
                           AND current_state != 'STABLE')"""
             )
 
-    def _ensure_runtime_columns(self):
-        """Apply additive schema upgrades to databases from older clones."""
+    def _migrate_schema(self):
+        """Upgrade older clone databases in explicit, ordered steps."""
+        version = self.connection.execute("PRAGMA user_version").fetchone()[0]
+        if version > SCHEMA_VERSION:
+            raise RuntimeError(
+                f"database schema {version} is newer than supported {SCHEMA_VERSION}"
+            )
+        if version == SCHEMA_VERSION:
+            return
+
+        # Version 1 consolidates all additive columns introduced by the
+        # pre-versioned application. Legacy extra columns remain harmless.
         columns = {
             row[1] for row in self.connection.execute("PRAGMA table_info(proxies)")
         }
-        if "failure_since" not in columns:
-            with self.connection:
-                self.connection.execute("ALTER TABLE proxies ADD COLUMN failure_since REAL")
         additions = {
+            "failure_since": "REAL",
             "city": "TEXT NOT NULL DEFAULT 'Unknown'",
             "exit_ip": "TEXT NOT NULL DEFAULT ''",
-            "http_exit_ip": "TEXT NOT NULL DEFAULT ''",
             "was_stable": "INTEGER NOT NULL DEFAULT 0",
         }
         with self.connection:
@@ -204,13 +211,11 @@ class StateRepository:
                     self.connection.execute(
                         f"ALTER TABLE proxies ADD COLUMN {name} {definition}"
                     )
-        check_columns = {
-            row[1] for row in self.connection.execute("PRAGMA table_info(checks)")
-        }
-        if "reachable" not in check_columns:
-            with self.connection:
+            check_columns = {
+                row[1] for row in self.connection.execute("PRAGMA table_info(checks)")
+            }
+            if "reachable" not in check_columns:
                 self.connection.execute("ALTER TABLE checks ADD COLUMN reachable INTEGER")
-        with self.connection:
             self.connection.execute(
                 """UPDATE proxies SET was_stable=1
                    WHERE current_state='STABLE' OR EXISTS (
@@ -219,6 +224,7 @@ class StateRepository:
                          AND state_transitions.new_state='STABLE'
                    )"""
             )
+            self.connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
 
     def load_histories(self, policy, retention_time: float, restart_tolerance: float, *, now_wall=None, now_mono=None):
         """Rebuild recent rolling histories without counting a long offline gap."""
@@ -226,14 +232,14 @@ class StateRepository:
         now_mono = time.monotonic() if now_mono is None else now_mono
         histories = {}
         proxies = self.connection.execute(
-            """SELECT id,protocol,address,country,city,exit_ip,http_exit_ip,lat,lon,first_seen_at,total_observed_uptime,
+            """SELECT id,protocol,address,country,city,exit_ip,lat,lon,first_seen_at,total_observed_uptime,
                       last_failure_at,last_checked_at,last_check_ok,current_state,failure_since,was_stable
                FROM proxies ORDER BY
                    CASE current_state WHEN 'STABLE' THEN 0 WHEN 'DEGRADED' THEN 1 ELSE 2 END,
                    last_checked_at DESC"""
         ).fetchall()
-        for (proxy_id, protocol, address, country, city, exit_ip, http_exit_ip,
-             lat, lon, first_seen, uptime,
+        for (proxy_id, protocol, address, country, city, exit_ip, lat, lon,
+             first_seen, uptime,
              last_failure, last_checked, last_check_ok, stored_state, failure_since,
              was_stable) in proxies:
             history = ProxyHistory(protocol, address, policy.config.history_size)
@@ -259,12 +265,11 @@ class StateRepository:
             if history.latest is None:
                 history.latest = ProxyResult(
                     protocol, address, bool(last_check_ok), None, country, lat, lon,
-                    city=city, exit_ip=exit_ip, http_exit_ip=http_exit_ip,
+                    city=city, exit_ip=exit_ip,
                 )
             else:
                 history.latest.city = city
                 history.latest.exit_ip = exit_ip
-                history.latest.http_exit_ip = http_exit_ip
             history.last_advertised_at = now_mono
             if last_checked is None or now_wall - last_checked > restart_tolerance:
                 history.alive_since = None

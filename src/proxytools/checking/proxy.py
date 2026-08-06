@@ -1,4 +1,4 @@
-"""Fast HTTP-based proxy validation and geolocation."""
+"""Validate a proxy through one HTTPS identity service and local GeoIP."""
 
 import statistics
 import time
@@ -9,8 +9,7 @@ from proxytools.http import session
 from proxytools.geoip import locate
 from proxytools.models import ProxyResult
 
-GEO_URL = "http://ip-api.com/json/?fields=status,query"
-HTTPS_GEO_URL = "https://ipwho.is/"
+IDENTITY_URL = "https://api.ipify.org?format=json"
 
 
 def connection_string(protocol: str, proxy: str) -> str:
@@ -25,20 +24,23 @@ def check_proxy(protocol: str, proxy: str, timeout: float = 5, samples: int = 1)
         started = time.perf_counter()
         try:
             response = session().get(
-                GEO_URL,
+                IDENTITY_URL,
                 proxies={"http": conn, "https": conn},
                 timeout=timeout,
             )
-            candidate = response.json()
-            if response.status_code != 200 or candidate.get("status") != "success":
-                return ProxyResult(protocol, proxy, False)
-            durations.append(round((time.perf_counter() - started) * 1000))
-            data = candidate
+            try:
+                candidate = response.json()
+                if response.status_code != 200 or not candidate.get("ip"):
+                    return ProxyResult(protocol, proxy, False)
+                durations.append(round((time.perf_counter() - started) * 1000))
+                data = candidate
+            finally:
+                response.close()
         except (requests.RequestException, ValueError):
             return ProxyResult(protocol, proxy, False)
     if data is None:
         return ProxyResult(protocol, proxy, False)
-    exit_ip = data.get("query", "")
+    exit_ip = data["ip"]
     location = locate(exit_ip)
     return ProxyResult(
         protocol=protocol,
@@ -50,39 +52,7 @@ def check_proxy(protocol: str, proxy: str, timeout: float = 5, samples: int = 1)
         lon=location["lon"],
         city=location["city"],
         exit_ip=exit_ip,
-        http_exit_ip=exit_ip,
     )
-
-
-def probe_https_route(result: ProxyResult, timeout: float) -> bool:
-    """Attach the browser-like HTTPS exit IP and local GeoIP data.
-
-    Failure is diagnostic-only: the configured browser URL remains the source
-    of truth for target availability, so an outage of this metadata provider
-    must not mark an otherwise working proxy dead.
-    """
-    conn = connection_string(result.protocol, result.proxy)
-    try:
-        response = session().get(
-            HTTPS_GEO_URL,
-            proxies={"http": conn, "https": conn},
-            timeout=timeout,
-        )
-        try:
-            data = response.json()
-            if response.status_code != 200 or data.get("success") is False or not data.get("ip"):
-                return False
-            result.exit_ip = data["ip"]
-            location = locate(result.exit_ip)
-            result.country = location["country"]
-            result.city = location["city"]
-            result.lat = location["lat"]
-            result.lon = location["lon"]
-            return True
-        finally:
-            response.close()
-    except (requests.RequestException, ValueError):
-        return False
 
 
 def check_url(

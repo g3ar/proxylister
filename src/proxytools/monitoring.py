@@ -8,7 +8,7 @@ import threading
 import time
 from typing import Callable
 
-from proxytools.checking import check_proxy, check_url, connection_string, probe_https_route
+from proxytools.checking import check_proxy, check_url, connection_string
 from proxytools.sources.proxyscrape import fetch_all_proxies
 from proxytools.stability import StabilityPolicy
 from proxytools.stability.history import update_advertised
@@ -37,7 +37,6 @@ class MonitorRow:
     restored: bool = False
     city: str = "Unknown"
     exit_ip: str = ""
-    http_exit_ip: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,7 +72,6 @@ class MonitorEngine:
         retention_time: float,
         fetcher=fetch_all_proxies,
         checker=check_proxy,
-        route_probe=None,
         repository=None,
         target_url=None,
     ):
@@ -85,7 +83,6 @@ class MonitorEngine:
         self.retention_time = retention_time
         self.fetcher = fetcher
         self.checker = checker
-        self.route_probe = route_probe or probe_https_route
         self.repository = repository
         self.target_url = target_url
         self.continuity_tolerance = 2 * refresh_interval
@@ -138,7 +135,6 @@ class MonitorEngine:
                     restored=history.restored,
                     city=history.latest.city,
                     exit_ip=history.latest.exit_ip,
-                    http_exit_ip=history.latest.http_exit_ip,
                 )
             )
         state_order = {"STABLE": 0, "PROBATION": 1, "DEGRADED": 2}
@@ -317,12 +313,9 @@ class MonitorEngine:
             del self.histories[key]
 
     def _check_candidate(self, protocol, proxy):
-        """Validate the proxy's browser-like HTTPS route and optional target."""
+        """Validate the proxy's HTTPS identity and optional target."""
         result = self.checker(protocol, proxy, self.timeout, self.samples)
-        if result.ok and not self.route_probe(result, self.timeout):
-            result.ok = False
-            result.failure_reason = "https"
-        elif result.ok and self.target_url:
+        if result.ok and self.target_url:
             if not check_url(
                 result, self.target_url, self.timeout, accept_forbidden=True
             ):

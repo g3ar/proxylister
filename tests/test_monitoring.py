@@ -29,7 +29,6 @@ class MonitorEngineTests(unittest.TestCase):
             retention_time=60,
             fetcher=lambda: [("http", "1.2.3.4:80")],
             checker=lambda *args: ProxyResult("http", "1.2.3.4:80", True, 50, "France"),
-            route_probe=lambda *_args: True,
         )
         engine.run(stop, publish)
 
@@ -68,7 +67,6 @@ class MonitorEngineTests(unittest.TestCase):
             retention_time=60,
             fetcher=lambda: [("http", "1.2.3.4:80"), ("http", "5.6.7.8:80")],
             checker=checker,
-            route_probe=lambda *_args: True,
         )
         saved = ProxyHistory("http", "1.2.3.4:80", 10)
         saved.latest = ProxyResult("http", saved.proxy, True, 40, "France")
@@ -92,11 +90,9 @@ class MonitorEngineTests(unittest.TestCase):
             refresh_interval=1, retention_time=60, target_url="https://example.com",
             checker=lambda *args: ProxyResult("http", "1.2.3.4:80", True, 50, "France"),
         )
-        route_probe = engine.route_probe = unittest.mock.Mock(return_value=True)
         with patch("proxytools.monitoring.check_url", return_value=True) as target_check:
             result = engine._check_candidate("http", "1.2.3.4:80")
         self.assertTrue(result.ok)
-        route_probe.assert_called_once_with(result, 3)
         target_check.assert_called_once_with(
             result, "https://example.com", 3, accept_forbidden=True
         )
@@ -107,7 +103,6 @@ class MonitorEngineTests(unittest.TestCase):
             refresh_interval=1, retention_time=60, target_url="https://example.com",
             checker=lambda *args: ProxyResult("http", "1.2.3.4:80", True, 50, "France"),
         )
-        engine.route_probe = unittest.mock.Mock(return_value=True)
         with patch("proxytools.monitoring.check_url", return_value=False):
             result = engine._check_candidate("http", "1.2.3.4:80")
         history = ProxyHistory("http", result.proxy, 10)
@@ -124,25 +119,21 @@ class MonitorEngineTests(unittest.TestCase):
             refresh_interval=1, retention_time=60, target_url="https://example.com",
             checker=lambda *args: ProxyResult("http", "1.2.3.4:80", False),
         )
-        route_probe = engine.route_probe = unittest.mock.Mock()
         with patch("proxytools.monitoring.check_url") as target_check:
             result = engine._check_candidate("http", "1.2.3.4:80")
         self.assertFalse(result.ok)
-        route_probe.assert_not_called()
         target_check.assert_not_called()
 
-    def test_https_identity_is_required_without_browser_url(self):
+    def test_failed_https_identity_check_stays_failed_without_browser_url(self):
         engine = MonitorEngine(
             policy=StabilityPolicy(StabilityConfig()), workers=1, timeout=3, samples=1,
             refresh_interval=1, retention_time=60,
-            checker=lambda *args: ProxyResult("http", "1.2.3.4:80", True, 50),
-            route_probe=lambda *_args: False,
+            checker=lambda *args: ProxyResult("http", "1.2.3.4:80", False),
         )
 
         result = engine._check_candidate("http", "1.2.3.4:80")
 
         self.assertFalse(result.ok)
-        self.assertEqual(result.failure_reason, "https")
 
 
 if __name__ == "__main__":

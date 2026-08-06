@@ -3,6 +3,8 @@
 import sys
 
 from proxytools import __version__
+from proxytools.config import ConfigError
+from proxytools.process_lock import AlreadyRunning, ProcessLock
 
 COMMANDS = {
     "list": "proxytools.commands.list",
@@ -55,21 +57,10 @@ def main(argv=None):
 
     from importlib import import_module
 
-    module = import_module(module_name)
-    if any(arg in {"-h", "--help"} for arg in args):
-        try:
-            return module.main(args)
-        except Exception as error:
-            from proxytools.config import ConfigError
-
-            if isinstance(error, ConfigError):
-                print(f"proxytools: configuration error: {error}", file=sys.stderr)
-                return 2
-            raise
-
-    from proxytools.process_lock import AlreadyRunning, ProcessLock
-
     try:
+        module = import_module(module_name)
+        if any(arg in {"-h", "--help"} for arg in args):
+            return module.main(args)
         with ProcessLock(command):
             from proxytools.geoip import ATTRIBUTION, configure_geoip, ensure_geoip_database
 
@@ -80,15 +71,10 @@ def main(argv=None):
                 print(f"Updated {geoip.path.name}. {ATTRIBUTION}", file=sys.stderr)
             if geoip.warning:
                 print(f"proxytools: {geoip.warning}", file=sys.stderr)
-            try:
-                return module.main(args)
-            except Exception as error:
-                from proxytools.config import ConfigError
-
-                if isinstance(error, ConfigError):
-                    print(f"proxytools: configuration error: {error}", file=sys.stderr)
-                    return 2
-                raise
+            return module.main(args)
+    except ConfigError as error:
+        print(f"proxytools: configuration error: {error}", file=sys.stderr)
+        return 2
     except AlreadyRunning as error:
         print(f"proxytools: {error}", file=sys.stderr)
         return 1
