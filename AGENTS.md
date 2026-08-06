@@ -75,6 +75,7 @@ Keep the CLI small. The intentional public options are:
 - mode selection;
 - `--help`;
 - `--version`;
+- `--about`;
 - `--clear`;
 - `--debug` for `list` output;
 - `--url`;
@@ -90,6 +91,7 @@ second `requirements.txt`.
 Monitor controls currently include:
 
 - arrows — select and scroll;
+- `F1` — show project information and contributor credits;
 - `Enter` — show detailed analytics for the selected proxy;
 - `s` — choose states;
 - `p` — choose protocols;

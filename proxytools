@@ -18,6 +18,7 @@ show_help() {
         '' \
         'Options:' \
         '  --version  Show the installed Proxy Tools version' \
+        '  --about    Show project information and credits' \
         '  --clear    Remove local databases, environment, locks, and generated caches' \
         '' \
         'Run ./proxytools <command> --help for command-specific options.' \
@@ -32,7 +33,7 @@ else
         list|monitor)
             shift
             ;;
-        help|-h|--help|--version|--clear)
+        help|-h|--help|--version|--about|--clear)
             shift
             ;;
         -*)
@@ -60,7 +61,7 @@ case "$COMMAND" in
         show_help
         exit 0
         ;;
-    --version)
+    --version|--about)
         ;;
     list)
         ;;

@@ -4,9 +4,10 @@ from unittest.mock import Mock
 
 from textual.widgets import DataTable, SelectionList, Static
 
+from proxytools.about import format_about
 from proxytools.monitoring import MonitorEngine, MonitorRow, MonitorSnapshot
 from proxytools.output.dashboard import ProxyMonitorApp
-from proxytools.output.dashboard_widgets import ProtocolSelectionList, ProxyDetailsScreen
+from proxytools.output.dashboard_widgets import AboutScreen, ProtocolSelectionList, ProxyDetailsScreen
 from proxytools.stability import StabilityConfig, StabilityPolicy
 
 
@@ -34,6 +35,16 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Checking 3/10", status)
             self.assertNotIn("Active", status)
             self.assertNotIn("Discovery", status)
+
+    async def test_f1_opens_shared_about_information(self):
+        app = ProxyMonitorApp(Mock(), autostart=False)
+
+        async with app.run_test() as pilot:
+            await pilot.press("f1")
+            self.assertIsInstance(app.screen, AboutScreen)
+            about = str(app.screen.query_one("#about", Static).content)
+            self.assertEqual(about, format_about())
+            await pilot.press("escape")
 
     async def test_snapshot_populates_table_and_opens_details(self):
         engine = MonitorEngine(

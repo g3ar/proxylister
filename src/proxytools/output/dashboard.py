@@ -11,9 +11,11 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import DataTable, Footer, Static
 
-from proxytools.monitoring import MonitorEngine, MonitorRow, MonitorSnapshot
+from proxytools.about import format_about
 from proxytools.browser import BrowserUnavailable, launch_browser_session
+from proxytools.monitoring import MonitorEngine, MonitorRow, MonitorSnapshot
 from proxytools.output.dashboard_widgets import (
+    AboutScreen,
     CountryFilterScreen,
     MonitorDataTable,
     ProxyDetailsScreen,
@@ -50,6 +52,7 @@ class ProxyMonitorApp(App):
         Binding("b", "browser", "Browser"),
         Binding("y", "copy_connection", "Copy"),
         Binding("enter", "details", "Details"),
+        Binding("f1", "about", "About"),
     ]
     COLUMNS = (
         ("State", "state"),
@@ -58,6 +61,7 @@ class ProxyMonitorApp(App):
         ("Alive", "alive"),
         ("Connection", "connection"),
     )
+
     def __init__(
         self, engine: MonitorEngine, *, stable_only=False, autostart=True,
         browser="auto", browser_url="about:blank",
@@ -284,6 +288,9 @@ class ProxyMonitorApp(App):
             self.notify("No proxy selected", severity="warning")
             return
         self.push_screen(ProxyDetailsScreen(self._details_text(row)))
+
+    def action_about(self):
+        self.push_screen(AboutScreen(format_about()))
 
     def action_states(self):
         self.push_screen(StateFilterScreen(self.selected_states), self.apply_state_filter)

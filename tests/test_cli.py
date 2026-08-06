@@ -3,6 +3,7 @@ import io
 import unittest
 
 from proxytools import __version__
+from proxytools.about import AUTHORS, BUILD_DATE, DESCRIPTION
 from proxytools import cli
 from proxytools.commands import list as list_command
 from proxytools.commands import monitor
@@ -16,6 +17,7 @@ class TopLevelCliTests(unittest.TestCase):
         for command in ("list", "monitor"):
             self.assertIn(command, output.getvalue())
         self.assertIn("--clear", output.getvalue())
+        self.assertIn("--about", output.getvalue())
 
     def test_unknown_command_returns_usage_error(self):
         output = io.StringIO()
@@ -28,6 +30,16 @@ class TopLevelCliTests(unittest.TestCase):
         with contextlib.redirect_stdout(output):
             self.assertEqual(cli.main(["--version"]), 0)
         self.assertEqual(output.getvalue().strip(), __version__)
+
+    def test_about(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(cli.main(["--about"]), 0)
+        about = output.getvalue()
+        self.assertIn(f"Proxy Tools {__version__}", about)
+        self.assertIn(DESCRIPTION, about)
+        self.assertIn(", ".join(AUTHORS), about)
+        self.assertIn(f"Build date: {BUILD_DATE}", about)
 
     def test_subcommand_program_names(self):
         self.assertEqual(list_command.build_parser().prog, "proxytools list")

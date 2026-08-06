@@ -85,6 +85,7 @@ the dashboard renders them and sends user actions to existing services.
 | Change runtime paths or cleanup | `paths.py`, `cleanup.py` | path and cleanup tests |
 | Change configuration | `config.py`, `proxytools.conf` | config and CLI tests |
 | Change dependencies or version metadata | `pyproject.toml` | launcher smoke test |
+| Change About text, credits, or build date | `src/proxytools/about.py` | CLI and dashboard tests |
 
 ## Repository map
 
@@ -103,6 +104,7 @@ src/proxytools/
   http.py                   bounded Requests session helpers
   browser.py                interactive browser launcher
   browser_session.py        detached temporary-profile helper
+  about.py                  shared CLI/TUI identity and contributor credits
   commands/
     list.py                 one-shot orchestration and output
     monitor.py              monitor construction and TUI startup
@@ -310,6 +312,12 @@ refreshes `.venv`, installs the editable project from `pyproject.toml`, exports
 `PYTHONPATH` and `PROXYTOOLS_HOME`, and delegates to `python -m proxytools`.
 `pyproject.toml` is the only dependency and project manifest; the package
 version is read dynamically from `proxytools.__version__`.
+
+`about.py` is the single source for the name, one-sentence description,
+contributors, build date, and formatted About text used by both `--about` and
+the TUI's `F1` modal. Add known contributors explicitly to `AUTHORS`; never
+infer or invent model names. Until a release build pipeline supplies a precise
+date, `BUILD_DATE` intentionally contains only the project build year.
 
 Root help runs before environment creation. `--clear` uses the system Python
 because it may delete `.venv` while running.

@@ -36,6 +36,7 @@ Useful help commands:
 ./proxytools list --help
 ./proxytools monitor --help
 ./proxytools --version
+./proxytools --about
 ```
 
 ## Typical use cases
@@ -152,6 +153,7 @@ When a URL is configured, pressing `b` opens that same address through the selec
 | Key | Action |
 |-----|--------|
 | Arrow keys | Select and scroll rows |
+| `F1` | Show project information, version, and contributor credits |
 | `Enter` | Open detailed analytics for the selected proxy; `Enter` or `Esc` closes it |
 | `s` | Choose visible statuses |
 | `p` | Choose visible protocols |
@@ -202,6 +204,12 @@ Private browsing isolates the temporary session from the main profile. It is not
 ### Stop the monitor
 
 Press `q` to stop. The monitor displays shutdown progress, allows active network requests to finish or reach their configured timeout, preserves useful monitor state, and then exits.
+
+## About and credits
+
+Run `./proxytools --about` from the shell or press `F1` in the monitor to see the project name, one-sentence description, current version, contributor list, and build date. Both interfaces use the same project metadata.
+
+Until standalone release builds are introduced, the build date contains the project build year. A future release pipeline will replace it with the exact reproducible release-build date.
 
 ## Proxy statuses
 

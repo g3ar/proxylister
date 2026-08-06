@@ -3,6 +3,7 @@
 import sys
 
 from proxytools import __version__
+from proxytools.about import format_about
 from proxytools.config import ConfigError
 from proxytools.process_lock import AlreadyRunning, ProcessLock
 
@@ -25,6 +26,7 @@ Commands:
 
 Options:
   --version  Show the installed Proxy Tools version
+  --about    Show project information and credits
   --clear    Remove local databases, environment, locks, and generated caches
 
 Run ./proxytools <command> --help for command-specific options.""",
@@ -39,6 +41,9 @@ def main(argv=None):
         return 0
     if args and args[0] == "--version":
         print(__version__)
+        return 0
+    if args and args[0] == "--about":
+        print(format_about())
         return 0
     if args and args[0] == "--clear":
         from proxytools.cleanup import main as clear

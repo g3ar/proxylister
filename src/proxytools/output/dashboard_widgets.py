@@ -32,6 +32,7 @@ class MonitorDataTable(DataTable):
         Binding("b", "monitor_browser", "Browser"),
         Binding("y", "monitor_copy", "Copy"),
         Binding("enter", "monitor_details", "Details", priority=True),
+        Binding("f1", "monitor_about", "About", priority=True),
     ]
 
     def action_monitor_quit(self):
@@ -54,6 +55,38 @@ class MonitorDataTable(DataTable):
 
     def action_monitor_details(self):
         self.app.action_details()
+
+    def action_monitor_about(self):
+        self.app.action_about()
+
+
+class AboutScreen(ModalScreen[None]):
+    """Project identity and contributor credits."""
+
+    DEFAULT_CSS = """
+    AboutScreen { align: center middle; background: $background 60%; }
+    AboutScreen > Vertical {
+        width: 72; height: auto;
+        padding: 1 2; border: round $primary; background: $surface;
+    }
+    AboutScreen .hint { color: $text-muted; margin-top: 1; }
+    """
+    BINDINGS = [
+        Binding("f1", "close", "Close"),
+        Binding("escape", "close", "Close"),
+    ]
+
+    def __init__(self, about):
+        super().__init__()
+        self.about = about
+
+    def compose(self):
+        with Vertical():
+            yield Static(self.about, id="about")
+            yield Label("F1/Esc close", classes="hint")
+
+    def action_close(self):
+        self.dismiss(None)
 
 
 class ProxyDetailsScreen(ModalScreen[None]):
