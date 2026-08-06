@@ -9,7 +9,10 @@ from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import DataTable, Footer, Header, Input, Static
+from textual.containers import Vertical
+from textual.screen import ModalScreen
+from textual.widgets import DataTable, Footer, Header, Input, Label, OptionList, SelectionList, Static
+from textual.widgets.option_list import Option
 
 from proxytools.monitoring import MonitorEngine, MonitorRow, MonitorSnapshot
 from proxytools.browser import BrowserUnavailable, launch_browser_session
@@ -28,8 +31,7 @@ class MonitorDataTable(DataTable):
     BINDINGS = [*DataTable.BINDINGS] + [
         Binding("q", "monitor_quit", "Quit"),
         Binding("p", "monitor_pause", "Pause"),
-        Binding("s", "monitor_stable_only", "Stable only"),
-        Binding("d", "monitor_degraded", "Degraded"),
+        Binding("s", "monitor_states", "States"),
         Binding("c", "monitor_country_filter", "Country"),
         Binding("r", "monitor_refresh", "Refresh"),
         Binding("b", "monitor_browser", "Browser"),
@@ -41,11 +43,8 @@ class MonitorDataTable(DataTable):
     def action_monitor_pause(self):
         self.app.action_pause()
 
-    def action_monitor_stable_only(self):
-        self.app.action_stable_only()
-
-    def action_monitor_degraded(self):
-        self.app.action_degraded()
+    def action_monitor_states(self):
+        self.app.action_states()
 
     def action_monitor_country_filter(self):
         self.app.action_country_filter()
@@ -55,6 +54,135 @@ class MonitorDataTable(DataTable):
 
     def action_monitor_browser(self):
         self.app.action_browser()
+
+
+class StateSelectionList(SelectionList):
+    """Selection list whose Enter key applies the enclosing modal."""
+
+    BINDINGS = [
+        *SelectionList.BINDINGS,
+        Binding("enter", "apply_states", show=False, priority=True),
+    ]
+
+    def action_apply_states(self):
+        self.screen.action_apply()
+
+
+class StateFilterScreen(ModalScreen[set[str]]):
+    """Keyboard-first multi-select modal for the finite proxy states."""
+
+    DEFAULT_CSS = """
+    StateFilterScreen { align: center middle; background: $background 60%; }
+    StateFilterScreen > Vertical {
+        width: 44; height: auto; max-height: 18;
+        padding: 1 2; border: round $primary; background: $surface;
+    }
+    StateFilterScreen SelectionList { height: 7; margin-top: 1; }
+    StateFilterScreen .hint { color: $text-muted; margin-top: 1; }
+    """
+    BINDINGS = [
+        Binding("enter", "apply", "Apply"),
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(self, selected):
+        super().__init__()
+        self.initial = set(selected)
+
+    def compose(self):
+        with Vertical():
+            yield Label("Proxy states")
+            yield StateSelectionList(
+                *( (state, state, state in self.initial) for state in ("STABLE", "PROBATION", "DEGRADED") ),
+                id="state-options",
+            )
+            yield Label("Space toggle  •  Enter apply  •  Esc cancel", classes="hint")
+
+    def action_apply(self):
+        self.dismiss(set(self.query_one(StateSelectionList).selected))
+
+    def action_cancel(self):
+        self.dismiss(self.initial)
+
+
+class CountrySearchInput(Input):
+    """Search input that lets arrows navigate the sibling option list."""
+
+    BINDINGS = [
+        Binding("down", "country_down", show=False, priority=True),
+        Binding("up", "country_up", show=False, priority=True),
+    ]
+
+    def action_country_down(self):
+        self.screen.move_highlight(1)
+
+    def action_country_up(self):
+        self.screen.move_highlight(-1)
+
+
+class CountryFilterScreen(ModalScreen[str]):
+    """Searchable exact-match picker built from currently known countries."""
+
+    DEFAULT_CSS = """
+    CountryFilterScreen { align: center middle; background: $background 60%; }
+    CountryFilterScreen > Vertical {
+        width: 58; height: 70%; max-height: 28;
+        padding: 1 2; border: round $primary; background: $surface;
+    }
+    CountryFilterScreen Input { margin: 1 0; }
+    CountryFilterScreen OptionList { height: 1fr; }
+    CountryFilterScreen .hint { color: $text-muted; margin-top: 1; }
+    """
+    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+    def __init__(self, countries, selected):
+        super().__init__()
+        self.countries = tuple(countries)
+        self.selected_country = selected
+
+    def compose(self):
+        with Vertical():
+            yield Label("Country")
+            yield CountrySearchInput(placeholder="Type to filter countries…", id="country-search")
+            yield OptionList(id="country-options")
+            yield Label("Type search  •  ↑/↓ select  •  Enter apply  •  Esc cancel", classes="hint")
+
+    def on_mount(self):
+        self.update_options("")
+        self.query_one(CountrySearchInput).focus()
+
+    def on_input_changed(self, event: Input.Changed):
+        self.update_options(event.value)
+
+    def on_input_submitted(self, event: Input.Submitted):
+        self.apply_highlighted()
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected):
+        self.dismiss("" if event.option.id == "__all__" else str(event.option.id))
+
+    def update_options(self, query):
+        folded = query.strip().casefold()
+        values = [country for country in self.countries if not folded or folded in country.casefold()]
+        options = [] if folded else [Option("All countries", id="__all__")]
+        options.extend(Option(country, id=country) for country in values)
+        option_list = self.query_one(OptionList)
+        option_list.clear_options().add_options(options)
+        option_list.highlighted = 0 if options else None
+
+    def move_highlight(self, delta):
+        option_list = self.query_one(OptionList)
+        count = option_list.option_count
+        if count:
+            option_list.highlighted = max(0, min(count - 1, (option_list.highlighted or 0) + delta))
+
+    def apply_highlighted(self):
+        option_list = self.query_one(OptionList)
+        if option_list.highlighted is not None:
+            option = option_list.get_option_at_index(option_list.highlighted)
+            self.dismiss("" if option.id == "__all__" else str(option.id))
+
+    def action_cancel(self):
+        self.dismiss(self.selected_country)
 
 
 class ProxyMonitorApp(App):
@@ -75,11 +203,6 @@ class ProxyMonitorApp(App):
     #table {
         height: 1fr;
     }
-    #country-filter {
-        display: none;
-        dock: top;
-        margin: 0 1;
-    }
     #details {
         height: 8;
         padding: 1 2;
@@ -93,12 +216,10 @@ class ProxyMonitorApp(App):
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("p", "pause", "Pause"),
-        Binding("s", "stable_only", "Stable only"),
-        Binding("d", "degraded", "Degraded"),
+        Binding("s", "states", "States"),
         Binding("c", "country_filter", "Country"),
         Binding("r", "refresh", "Refresh"),
         Binding("b", "browser", "Browser"),
-        Binding("escape", "cancel_filter", "Cancel filter", show=False),
     ]
     COLUMNS = (
         ("State", "state"),
@@ -120,8 +241,7 @@ class ProxyMonitorApp(App):
     ):
         super().__init__()
         self.engine = engine
-        self.stable_only = stable_only
-        self.show_degraded = False
+        self.selected_states = {"STABLE"} if stable_only else {"STABLE", "PROBATION"}
         self.autostart = autostart
         self.paused = False
         self.country_filter = ""
@@ -143,7 +263,6 @@ class ProxyMonitorApp(App):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield Static("Starting monitor…", id="status")
-        yield Input(placeholder="Country filter (empty = all countries)", id="country-filter")
         yield MonitorDataTable(id="table", cursor_type="row", zebra_stripes=True)
         yield Static("Select a proxy to see stability details.", id="details")
         yield Footer()
@@ -295,13 +414,11 @@ class ProxyMonitorApp(App):
             "checking": f"Checking {snapshot.checked}/{snapshot.total}",
             "waiting": f"Next cycle in {snapshot.next_cycle_in}s",
         }.get(snapshot.phase, snapshot.phase.title())
-        filters = [
-            "stable only"
-            if self.stable_only
-            else ("stable + probation + degraded" if self.show_degraded else "stable + probation")
-        ]
+        state_order = ("STABLE", "PROBATION", "DEGRADED")
+        selected = [state.lower() for state in state_order if state in self.selected_states]
+        filters = [f"states: {'+'.join(selected) or 'none'}"]
         if self.country_filter:
-            filters.append(f"country contains '{self.country_filter}'")
+            filters.append(f"country: {self.country_filter}")
         text = (
             f"Cycle {snapshot.cycle} │ {phase} │ {snapshot.stable_count} stable │ "
             f"{snapshot.tracked_count} tracked │ {visible} visible │ {', '.join(filters)}"
@@ -341,34 +458,27 @@ class ProxyMonitorApp(App):
         elif self.latest_snapshot is not None:
             self._render_status(self.latest_snapshot, len(self.rows_by_key))
 
-    def action_stable_only(self):
-        self.stable_only = not self.stable_only
-        if self.latest_snapshot is not None:
-            self.schedule_filter_rebuild()
+    def action_states(self):
+        self.push_screen(StateFilterScreen(self.selected_states), self.apply_state_filter)
 
-    def action_degraded(self):
-        self.show_degraded = not self.show_degraded
+    def apply_state_filter(self, selected):
+        self.selected_states = set(selected)
         if self.latest_snapshot is not None:
             self.schedule_filter_rebuild()
 
     def action_country_filter(self):
-        country_input = self.query_one("#country-filter", Input)
-        country_input.value = self.country_filter
-        country_input.display = True
-        country_input.focus()
+        countries = sorted(
+            {row.country for row in self.all_rows_by_key.values() if row.country != "Unknown"},
+            key=str.casefold,
+        )
+        if any(row.country == "Unknown" for row in self.all_rows_by_key.values()):
+            countries.append("Unknown")
+        self.push_screen(
+            CountryFilterScreen(countries, self.country_filter), self.apply_country_filter
+        )
 
-    def action_cancel_filter(self):
-        country_input = self.query_one("#country-filter", Input)
-        if country_input.display:
-            country_input.display = False
-            self.query_one("#table", DataTable).focus()
-
-    def on_input_submitted(self, event: Input.Submitted):
-        if event.input.id != "country-filter":
-            return
-        self.country_filter = event.value.strip()
-        event.input.display = False
-        self.query_one("#table", DataTable).focus()
+    def apply_country_filter(self, country):
+        self.country_filter = country
         if self.latest_snapshot is not None:
             self.schedule_filter_rebuild()
 
@@ -534,7 +644,6 @@ class ProxyMonitorApp(App):
     def _row_visible(self, row):
         country_filter = self.country_filter.casefold()
         return (
-            (not self.stable_only or row.state == "STABLE")
-            and (self.stable_only or self.show_degraded or row.state != "DEGRADED")
-            and (not country_filter or country_filter in row.country.casefold())
+            row.state in self.selected_states
+            and (not country_filter or country_filter == row.country.casefold())
         )

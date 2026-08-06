@@ -1,7 +1,7 @@
 import unittest
 from dataclasses import replace
 
-from textual.widgets import DataTable, Static
+from textual.widgets import DataTable, SelectionList, Static
 
 from proxytools.monitoring import MonitorEngine, MonitorRow, MonitorSnapshot
 from proxytools.output.dashboard import ProxyMonitorApp
@@ -70,29 +70,31 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             )
             app.receive_snapshot(sorted_snapshot)
             self.assertEqual(table.row_count, 1)
-            await pilot.press("d")
+            await pilot.press("s")
+            state_options = app.screen.query_one(SelectionList)
+            state_options.select("DEGRADED")
+            await pilot.press("enter")
             await pilot.pause(0.1)
-            self.assertTrue(app.show_degraded)
+            self.assertEqual(app.selected_states, {"STABLE", "PROBATION", "DEGRADED"})
             self.assertEqual(table.row_count, 2)
             self.assertEqual(table.get_row_at(0)[0].plain, "PROBATION")
             self.assertEqual(table.get_row_at(0)[5], "200ms")
             selected = table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value
             self.assertEqual(selected, "http|1.2.3.4:80")
             await pilot.press("c")
-            await pilot.press(*"spain", "enter")
-            await pilot.pause()
-            self.assertEqual(app.query_one(DataTable).row_count, 0)
-            await pilot.press("c")
-            country_input = app.query_one("#country-filter")
-            country_input.value = "fran"
-            await pilot.press("enter")
-            await pilot.pause()
+            await pilot.press(*"fran", "enter")
+            await pilot.pause(0.1)
+            self.assertEqual(app.country_filter, "France")
             self.assertEqual(app.query_one(DataTable).row_count, 1)
             await pilot.press("s")
-            await pilot.pause()
+            state_options = app.screen.query_one(SelectionList)
+            state_options.deselect("STABLE").deselect("PROBATION").select("DEGRADED")
+            await pilot.press("enter")
+            await pilot.pause(0.1)
             self.assertEqual(app.query_one(DataTable).row_count, 0)
-            await pilot.press("s")
-            await pilot.pause()
+            await pilot.press("c", "enter")
+            await pilot.pause(0.1)
+            self.assertEqual(app.country_filter, "")
             self.assertEqual(app.query_one(DataTable).row_count, 1)
 
 
