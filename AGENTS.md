@@ -91,13 +91,14 @@ second `requirements.txt`.
 Monitor controls currently include:
 
 - arrows — select and scroll;
+- `Esc` — clear the current selection without moving the viewport;
 - `F1` — show project information and contributor credits;
 - `Enter` — show detailed analytics for the selected proxy;
 - `s` — choose states;
 - `p` — choose protocols;
 - `c` — choose country;
 - `b` — open the configured URL through the selected proxy in an isolated
-  private browser session;
+  private browser session and release the table selection;
 - `y` — copy the selected connection string with OSC 52;
 - `q` or `Ctrl+C` — display live shutdown progress, finish bounded active work,
   and exit through the same graceful path.

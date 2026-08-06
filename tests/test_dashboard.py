@@ -1,6 +1,6 @@
 import unittest
 from dataclasses import replace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from textual.widgets import DataTable, SelectionList, Static
 
@@ -49,6 +49,111 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Enter", rendered)
             self.assertIn("Q", rendered)
             self.assertEqual(len(rendered), footer.size.width)
+
+    async def test_selection_can_be_released_without_moving_the_viewport(self):
+        app = ProxyMonitorApp(Mock(), autostart=False)
+        rows = tuple(
+            MonitorRow(
+                key=("http", f"192.0.2.{index}:80"),
+                state="PROBATION",
+                alive_seconds=30,
+                checks=2,
+                required_checks=5,
+                streak=2,
+                success_rate=1,
+                median_latency=100 + index,
+                p95_latency=120 + index,
+                jitter=10,
+                country="France",
+                blockers=("checks",),
+                connection=f"http://192.0.2.{index}:80",
+            )
+            for index in range(30)
+        )
+        snapshot = MonitorSnapshot(1, 30, 30, 0, 30, "waiting", 10, rows)
+
+        async with app.run_test(size=(80, 12)) as pilot:
+            app.receive_snapshot(snapshot)
+            await pilot.pause()
+            table = app.query_one(DataTable)
+            table.move_cursor(row=20, animate=False)
+            await pilot.pause()
+            scroll_y = float(table.scroll_y)
+
+            await pilot.press("escape")
+            await pilot.pause()
+            self.assertFalse(table.show_cursor)
+            self.assertEqual(float(table.scroll_y), scroll_y)
+
+            app.receive_snapshot(replace(snapshot, cycle=2, rows=tuple(reversed(rows))))
+            await pilot.pause()
+            self.assertFalse(table.show_cursor)
+            self.assertEqual(float(table.scroll_y), scroll_y)
+
+            app.action_copy_connection()
+            self.assertEqual(app._clipboard, "")
+            await pilot.press("down")
+            self.assertTrue(table.show_cursor)
+
+    async def test_repeated_click_and_browser_action_release_selection(self):
+        app = ProxyMonitorApp(Mock(), autostart=False)
+        row = MonitorRow(
+            key=("http", "192.0.2.1:80"), state="PROBATION",
+            alive_seconds=30, checks=2, required_checks=5, streak=2,
+            success_rate=1, median_latency=100, p95_latency=120, jitter=10,
+            country="France", blockers=("checks",),
+            connection="http://192.0.2.1:80",
+        )
+        second_row = replace(
+            row,
+            key=("http", "192.0.2.2:80"),
+            connection="http://192.0.2.2:80",
+            median_latency=110,
+        )
+        snapshot = MonitorSnapshot(
+            1, 2, 2, 0, 2, "waiting", 10, (row, second_row)
+        )
+
+        async with app.run_test(size=(80, 12)) as pilot:
+            app.receive_snapshot(snapshot)
+            await pilot.pause()
+            table = app.query_one(DataTable)
+            self.assertTrue(table.show_cursor)
+            await pilot.click("#table", offset=(10, 2))
+            await pilot.pause()
+            self.assertTrue(table.show_cursor)
+            self.assertEqual(table.cursor_row, 1)
+
+            await pilot.click("#table", offset=(10, 2))
+            await pilot.pause()
+            self.assertFalse(table.show_cursor)
+
+            await pilot.click("#table", offset=(10, 1))
+            await pilot.pause()
+            self.assertTrue(table.show_cursor)
+            self.assertEqual(table.cursor_row, 0)
+
+            await pilot.click("#table", offset=(10, 4))
+            await pilot.pause()
+            self.assertFalse(table.show_cursor)
+
+            await pilot.click("#table", offset=(10, 1))
+            await pilot.click("#status", offset=(1, 1))
+            await pilot.pause()
+            self.assertFalse(table.show_cursor)
+
+            await pilot.click("#table", offset=(10, 1))
+            await pilot.pause()
+            self.assertTrue(table.show_cursor)
+
+            process = Mock()
+            process.poll.return_value = None
+            with patch(
+                "proxytools.output.dashboard.launch_browser_session",
+                return_value=("Chrome", process),
+            ):
+                app.action_browser()
+            self.assertFalse(table.show_cursor)
 
     async def test_status_shows_activity_and_only_nondefault_filters(self):
         app = ProxyMonitorApp(Mock(), autostart=False)

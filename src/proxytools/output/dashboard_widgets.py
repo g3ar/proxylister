@@ -8,8 +8,10 @@ focused on translating monitor snapshots into visible rows.
 """
 
 from rich.text import Text
+from textual import events
 from textual.binding import Binding
 from textual.containers import Vertical
+from textual.coordinate import Coordinate
 from textual.screen import ModalScreen
 from textual.widgets import DataTable, Input, Label, OptionList, SelectionList, Static
 from textual.widgets.option_list import Option
@@ -85,7 +87,37 @@ class MonitorDataTable(DataTable):
         Binding("y", "monitor_copy", "Copy"),
         Binding("enter", "monitor_details", "Details", priority=True),
         Binding("f1", "monitor_about", "About", priority=True),
+        Binding("escape", "monitor_clear_selection", show=False, priority=True),
     ]
+
+    async def _on_click(self, event: events.Click) -> None:
+        """Select a clicked row, or clear it when the same row is clicked again."""
+        meta = event.style.meta
+        row = meta.get("row")
+        column = meta.get("column")
+        data_cell = (
+            isinstance(row, int) and row >= 0
+            and isinstance(column, int) and column >= 0
+            and not meta.get("out_of_bounds", False)
+        )
+        if data_cell and self.show_cursor and row == self.cursor_row:
+            self.app.action_clear_selection()
+            event.stop()
+            return
+        if data_cell and not self.show_cursor:
+            self.cursor_coordinate = Coordinate(row, column)
+            self.show_cursor = True
+        elif not data_cell:
+            self.app.action_clear_selection()
+        await super()._on_click(event)
+
+    def action_cursor_up(self):
+        self.show_cursor = True
+        super().action_cursor_up()
+
+    def action_cursor_down(self):
+        self.show_cursor = True
+        super().action_cursor_down()
 
     def action_monitor_quit(self):
         self.app.action_quit()
@@ -110,6 +142,9 @@ class MonitorDataTable(DataTable):
 
     def action_monitor_about(self):
         self.app.action_about()
+
+    def action_monitor_clear_selection(self):
+        self.app.action_clear_selection()
 
 
 class AboutScreen(ModalScreen[None]):

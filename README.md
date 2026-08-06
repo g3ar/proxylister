@@ -156,6 +156,7 @@ When a URL is configured, pressing `b` opens that same address through the selec
 | Key | Action |
 |-----|--------|
 | Arrow keys | Select and scroll rows |
+| `Esc` | Clear the current selection and keep the table at its current position |
 | `F1` | Show project information, version, and contributor credits |
 | `Enter` | Open detailed analytics for the selected proxy; `Enter` or `Esc` closes it |
 | `s` | Choose visible statuses |
@@ -193,6 +194,12 @@ The status line always lists the filters currently applied. An empty selection i
 Press `y` to copy the complete connection string, such as `socks5://198.51.100.20:1080`. Copying uses the terminal's OSC 52 protocol and requires no `xclip` or `xsel`. Most current terminals support it locally and through SSH, although terminal or multiplexer security settings may disable it.
 
 Press `b` to open the configured URL through the selected proxy in a disposable private browser session. If no `--url` or `URL` setting is configured, the browser opens a blank page so you can enter an address manually.
+The selection is cleared as the browser starts, so background updates do not
+scroll the monitor after the browser covers the terminal. Clicking the selected
+row again, an empty part of the table, or anywhere outside the table also clears
+it. Outside clicks continue to the control that was clicked. Without a
+selection, `Enter`, `b`, and `y` do nothing except report that no proxy is
+selected.
 
 - Chrome/Chromium uses incognito mode and a temporary user-data directory.
 - Firefox uses private mode and a generated temporary profile.

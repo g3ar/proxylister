@@ -9,6 +9,7 @@ from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.screen import ModalScreen
 from textual.widgets import DataTable, Static
 
 from proxytools.about import format_about
@@ -111,6 +112,13 @@ class ProxyMonitorApp(App):
         self.stop_event.set()
         self.engine.request_refresh()
 
+    def on_click(self, event):
+        """Release row selection for main-screen clicks outside the table."""
+        if not isinstance(self.screen, ModalScreen) and not isinstance(
+            event.widget, MonitorDataTable
+        ):
+            self.action_clear_selection()
+
     @work(thread=True, exclusive=True, group="monitor")
     def monitor_worker(self):
         try:
@@ -167,7 +175,7 @@ class ProxyMonitorApp(App):
         selected_key = None
         selected_row = table.cursor_row
         scroll_y = float(table.scroll_y)
-        if table.row_count:
+        if table.row_count and table.show_cursor:
             selected_key = str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
         for row in snapshot.changed_rows:
             key = f"{row.key[0]}|{row.key[1]}"
@@ -198,11 +206,14 @@ class ProxyMonitorApp(App):
                     animate=False,
                     immediate=True,
                 )
+            elif not table.show_cursor:
+                table.scroll_to(y=scroll_y, animate=False, immediate=True)
 
     def render_snapshot(self, snapshot: MonitorSnapshot):
         table = self.query_one("#table", DataTable)
         selected_key = None
-        if table.row_count:
+        scroll_y = float(table.scroll_y)
+        if table.row_count and table.show_cursor:
             selected_key = str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
         rows = self.filtered_rows(snapshot)
         next_rows = {f"{row.key[0]}|{row.key[1]}": row for row in rows}
@@ -237,6 +248,8 @@ class ProxyMonitorApp(App):
             self.completed_cycle = snapshot.cycle
             if selected_key in self.rows_by_key:
                 table.move_cursor(row=table.get_row_index(selected_key), animate=False)
+            elif not table.show_cursor:
+                table.scroll_to(y=scroll_y, animate=False, immediate=True)
         self._render_status(snapshot)
 
     def _render_status(self, snapshot: MonitorSnapshot):
@@ -308,7 +321,7 @@ class ProxyMonitorApp(App):
 
     def action_details(self):
         table = self.query_one("#table", DataTable)
-        if not table.row_count:
+        if not table.row_count or not table.show_cursor:
             self.notify("No proxy selected", severity="warning")
             return
         key = str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
@@ -375,15 +388,16 @@ class ProxyMonitorApp(App):
             return
         table = self.query_one("#table", DataTable)
         selected_key = None
-        if table.row_count:
+        scroll_y = float(table.scroll_y)
+        if table.row_count and table.show_cursor:
             selected_key = str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
         rows = [row for row in self.all_rows_by_key.values() if self._row_visible(row)]
         table.clear()
         self.rows_by_key = {}
         self.cells_by_key = {}
-        self._add_filter_chunk(generation, rows, 0, selected_key)
+        self._add_filter_chunk(generation, rows, 0, selected_key, scroll_y)
 
-    def _add_filter_chunk(self, generation, rows, offset, selected_key):
+    def _add_filter_chunk(self, generation, rows, offset, selected_key, scroll_y):
         if generation != self.filter_generation:
             return
         table = self.query_one("#table", DataTable)
@@ -395,12 +409,19 @@ class ProxyMonitorApp(App):
             self.rows_by_key[key] = row
             self.cells_by_key[key] = cells
         if end < len(rows):
-            self.set_timer(0.01, lambda: self._add_filter_chunk(generation, rows, end, selected_key))
+            self.set_timer(
+                0.01,
+                lambda: self._add_filter_chunk(
+                    generation, rows, end, selected_key, scroll_y
+                ),
+            )
             return
 
         table.sort("state", "median", key=self._monitor_sort_key)
         if selected_key in self.rows_by_key:
             table.move_cursor(row=table.get_row_index(selected_key), animate=False)
+        elif not table.show_cursor:
+            table.scroll_to(y=scroll_y, animate=False, immediate=True)
         self.filter_rebuilding = False
         snapshot = self.filter_pending_snapshot or self.latest_snapshot
         self.filter_pending_snapshot = None
@@ -411,7 +432,7 @@ class ProxyMonitorApp(App):
             self.notify("A browser session is already running", severity="warning")
             return
         table = self.query_one("#table", DataTable)
-        if not table.row_count:
+        if not table.row_count or not table.show_cursor:
             self.notify("No proxy selected", severity="warning")
             return
         key = str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
@@ -419,6 +440,7 @@ class ProxyMonitorApp(App):
         if row is None:
             self.notify("No proxy selected", severity="warning")
             return
+        self.action_clear_selection()
         try:
             family, self.browser_process = launch_browser_session(
                 self.browser, row.key[0], row.key[1], self.browser_url
@@ -436,7 +458,7 @@ class ProxyMonitorApp(App):
 
     def action_copy_connection(self):
         table = self.query_one("#table", DataTable)
-        if not table.row_count:
+        if not table.row_count or not table.show_cursor:
             self.notify("No proxy selected", severity="warning")
             return
         key = str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
@@ -446,6 +468,14 @@ class ProxyMonitorApp(App):
             return
         self.copy_to_clipboard(row.connection)
         self.notify(f"Copied {row.connection}")
+
+    def action_clear_selection(self):
+        table = self.query_one("#table", DataTable)
+        if not table.show_cursor:
+            return
+        scroll_y = float(table.scroll_y)
+        table.show_cursor = False
+        table.scroll_to(y=scroll_y, animate=False, immediate=True)
 
     def browser_watcher(self, process):
         return_code = process.wait()

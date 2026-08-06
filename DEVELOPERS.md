@@ -241,6 +241,13 @@ The dashboard updates changed cells, rebuilds large filtered views in chunks,
 preserves selection and scroll position, and sorts only at controlled pass
 boundaries. Keep those properties when changing rendering.
 
+Selection is optional. `Esc`, a repeated click on the selected row, and the
+`b` action clear the visible cursor while preserving the current
+viewport. Snapshot updates and controlled resorts must not restore or follow
+the former proxy key until keyboard or mouse navigation selects a row again.
+Clicks on empty table space or outside the table also clear selection; an
+outside click must continue bubbling to the control that received it.
+
 The main table intentionally has one compact layout: State, Country, Median,
 Alive, and Connection. Detailed proxy analytics belong in the `Enter` modal,
 not additional permanent columns or a separate debug mode. The `y` action uses
