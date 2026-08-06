@@ -102,6 +102,7 @@ During long-running monitoring, checks use two independent lanes. Roughly 20% of
 | `--min-alive-time` | Required continuous live time in seconds | `60` |
 | `--max-jitter` | Maximum latency standard deviation in ms | `150` |
 | `--alive-failure-tolerance` | Failures allowed before continuous live time resets | `0` |
+| `--degraded-after` | Failed seconds allowed after `STABLE` before `DEGRADED` | `60` |
 | `--retention-time` | Continue tracking proxies absent from ProxyScrape for this many seconds | `1800` |
 | `--stable-only` | Hide probation and degraded proxies | off |
 | `--browser` | Browser for the `b` action: `auto`, `chrome`, or `firefox` | `auto` |
@@ -118,7 +119,7 @@ The Textual table is scrollable, supports row selection, and updates a detail pa
 
 Only one working command (`scan` or `monitor`) may run from a given clone at a time. The kernel-backed `proxytools.lock` is released automatically even after a crash. Separate clones use separate locks and databases and can run simultaneously. Help and version commands never acquire the lock.
 
-A successful check requires a duration below `--max-latency`. By default, any failed check resets continuous live time. Setting `--alive-failure-tolerance 1`, for example, preserves the original live-time counter through one isolated failure, although the proxy still becomes `DEGRADED` immediately.
+A successful check requires a duration below `--max-latency`. By default, any failed check resets continuous live time. Setting `--alive-failure-tolerance 1`, for example, preserves the original live-time counter through one isolated failure. A `STABLE` proxy gets a separate `--degraded-after` grace period: its first failure moves it to `PROBATION`, it remains in the active lane, and only another failed check after the grace duration moves it to `DEGRADED`. This timer is stored in SQLite and survives restarts; a successful check clears it.
 
 ## Tests
 

@@ -36,6 +36,7 @@ class ProxyHistory:
     total_observed_uptime: float = 0
     last_failure_at: float | None = None
     restored: bool = False
+    failure_since: float | None = None
 
     def __post_init__(self):
         self.samples = deque(maxlen=self.history_size)
@@ -88,6 +89,7 @@ class ProxyHistory:
             self.consecutive_failures = 0
             if self.alive_since is None:
                 self.alive_since = now
+            self.failure_since = None
         else:
             # A target-URL failure still proved that the proxy itself answered
             # and produced geolocation data. Keep it visible in the dashboard,
@@ -104,6 +106,15 @@ class ProxyHistory:
             if self.state != "STABLE":
                 self.stable_since = now
             self.state = "STABLE"
+        elif not succeeded and self.state == "STABLE":
+            self.failure_since = now
+            self.state = "PROBATION"
+        elif not succeeded and self.failure_since is not None:
+            self.state = (
+                "DEGRADED"
+                if now - self.failure_since >= config.degraded_after
+                else "PROBATION"
+            )
         elif not succeeded and self.latest is not None:
             self.state = "DEGRADED"
         else:

@@ -53,6 +53,10 @@ def build_parser(prog="proxytools monitor"):
     stability.add_argument("--min-alive-time", type=nonnegative_float, default=60, help="Continuous live seconds required")
     stability.add_argument("--max-jitter", type=nonnegative_float, default=150, help="Maximum latency deviation in ms")
     stability.add_argument("--alive-failure-tolerance", type=nonnegative_int, default=0, help="Failures allowed before alive time resets")
+    stability.add_argument(
+        "--degraded-after", type=nonnegative_float, default=60,
+        help="Failed seconds allowed after STABLE before DEGRADED",
+    )
     stability.add_argument("--retention-time", type=positive_float, default=1800, help="Seconds to retain unadvertised proxies")
 
     display = parser.add_argument_group("display")
@@ -92,6 +96,7 @@ def policy_from_args(args):
             max_latency=args.max_latency,
             max_jitter=args.max_jitter,
             failure_tolerance=args.alive_failure_tolerance,
+            degraded_after=args.degraded_after,
         )
     )
 

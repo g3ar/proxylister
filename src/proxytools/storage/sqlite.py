@@ -26,6 +26,7 @@ class CheckObservation:
     old_state: str
     new_state: str
     reason: str = ""
+    failure_since: float | None = None
 
 
 class StateRepository:
@@ -41,6 +42,7 @@ class StateRepository:
         self.connection.execute("PRAGMA foreign_keys=ON")
         self.connection.execute("PRAGMA busy_timeout=5000")
         self._create_schema()
+        self._ensure_runtime_columns()
         self._discard_unusable_proxies()
 
     def _create_schema(self):
@@ -62,6 +64,7 @@ class StateRepository:
                 total_failures INTEGER NOT NULL DEFAULT 0,
                 total_observed_uptime REAL NOT NULL DEFAULT 0,
                 current_state TEXT NOT NULL DEFAULT 'PROBATION',
+                failure_since REAL,
                 UNIQUE(protocol, address)
             );
             CREATE TABLE IF NOT EXISTS checks (
@@ -94,7 +97,13 @@ class StateRepository:
         with self.connection:
             for item in observations:
                 result = item.result
-                if not item.accepted or item.new_state not in {"STABLE", "PROBATION"}:
+                grace_probation = (
+                    item.new_state == "PROBATION" and item.failure_since is not None
+                )
+                if (
+                    item.new_state not in {"STABLE", "PROBATION"}
+                    or (not item.accepted and not grace_probation)
+                ):
                     # SQLite is restart state, not a graveyard. Foreign keys
                     # cascade detailed checks and transitions for a proxy that
                     # is no longer usable; its in-memory history may still
@@ -120,8 +129,8 @@ class StateRepository:
                     INSERT INTO proxies (
                         protocol,address,country,lat,lon,first_seen_at,last_seen_at,last_checked_at,
                         last_success_at,last_failure_at,last_check_ok,total_successes,total_failures,
-                        total_observed_uptime,current_state
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        total_observed_uptime,current_state,failure_since
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     ON CONFLICT(protocol,address) DO UPDATE SET
                         country=CASE WHEN excluded.country != 'Unknown' THEN excluded.country ELSE proxies.country END,
                         lat=COALESCE(excluded.lat,proxies.lat), lon=COALESCE(excluded.lon,proxies.lon),
@@ -132,11 +141,13 @@ class StateRepository:
                         total_successes=proxies.total_successes+excluded.total_successes,
                         total_failures=proxies.total_failures+excluded.total_failures,
                         total_observed_uptime=proxies.total_observed_uptime+excluded.total_observed_uptime,
-                        current_state=excluded.current_state
+                        current_state=excluded.current_state,
+                        failure_since=excluded.failure_since
                     """,
                     (result.protocol, result.proxy, result.country, result.lat, result.lon,
                      item.checked_at, item.checked_at, item.checked_at, success_at, failure_at,
-                     int(item.accepted), int(item.accepted), int(not item.accepted), uptime, item.new_state),
+                     int(item.accepted), int(item.accepted), int(not item.accepted), uptime,
+                     item.new_state, item.failure_since),
                 )
                 proxy_id = self.connection.execute(
                     "SELECT id FROM proxies WHERE protocol=? AND address=?", result.key
@@ -158,8 +169,17 @@ class StateRepository:
             self.connection.execute(
                 """DELETE FROM proxies
                    WHERE current_state NOT IN ('STABLE','PROBATION')
-                      OR last_check_ok IS NOT 1"""
+                      OR (last_check_ok IS NOT 1 AND failure_since IS NULL)"""
             )
+
+    def _ensure_runtime_columns(self):
+        """Apply additive schema upgrades to databases from older clones."""
+        columns = {
+            row[1] for row in self.connection.execute("PRAGMA table_info(proxies)")
+        }
+        if "failure_since" not in columns:
+            with self.connection:
+                self.connection.execute("ALTER TABLE proxies ADD COLUMN failure_since REAL")
 
     def load_histories(self, policy, retention_time: float, restart_tolerance: float, *, now_wall=None, now_mono=None):
         """Rebuild recent rolling histories without counting a long offline gap."""
@@ -168,13 +188,13 @@ class StateRepository:
         histories = {}
         proxies = self.connection.execute(
             """SELECT id,protocol,address,country,lat,lon,first_seen_at,total_observed_uptime,
-                      last_failure_at,last_checked_at,last_check_ok,current_state
+                      last_failure_at,last_checked_at,last_check_ok,current_state,failure_since
                FROM proxies ORDER BY
                    CASE current_state WHEN 'STABLE' THEN 0 WHEN 'DEGRADED' THEN 1 ELSE 2 END,
                    last_checked_at DESC"""
         ).fetchall()
         for (proxy_id, protocol, address, country, lat, lon, first_seen, uptime,
-             last_failure, last_checked, last_check_ok, stored_state) in proxies:
+             last_failure, last_checked, last_check_ok, stored_state, failure_since) in proxies:
             history = ProxyHistory(protocol, address, policy.config.history_size)
             history.first_seen_at = first_seen
             history.total_observed_uptime = uptime
@@ -198,6 +218,8 @@ class StateRepository:
             if last_checked is None or now_wall - last_checked > restart_tolerance:
                 history.alive_since = None
                 history.stable_since = None
+            if failure_since is not None:
+                history.failure_since = now_mono - max(0, now_wall - failure_since)
             history.state = stored_state
             history.restored = True
             histories[history.key] = history

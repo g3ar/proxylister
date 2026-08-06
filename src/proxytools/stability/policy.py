@@ -19,6 +19,7 @@ class StabilityConfig:
     max_latency: float = 500
     max_jitter: float = 150
     failure_tolerance: int = 0
+    degraded_after: float = 60
 
 
 class StabilityPolicy:

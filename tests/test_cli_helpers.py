@@ -72,20 +72,26 @@ class CliHelperTests(unittest.TestCase):
         self.assertEqual(history.p95_latency, 110)
         self.assertEqual(history.jitter, 7)
 
-    def test_failure_degrades_then_success_recovers_to_probation(self):
+    def test_stable_failure_gets_grace_then_degrades_and_recovers(self):
         config = StabilityConfig(min_checks=1, min_success_streak=1, min_alive_time=0)
         policy = StabilityPolicy(config)
         history = ProxyHistory("http", self.fast.proxy, config.history_size)
         history.record(self.fast, 100, policy)
         self.assertEqual(history.state, "STABLE")
         history.record(ProxyResult("http", self.fast.proxy, False), 110, policy)
-        self.assertEqual(history.state, "DEGRADED")
+        self.assertEqual(history.state, "PROBATION")
         self.assertIn("failed", policy.blockers(history, 110))
         self.assertIsNone(history.alive_since)
         self.assertIsNone(history.stable_since)
-        history.record(self.fast, 120, policy)
+        self.assertEqual(history.failure_since, 110)
+        history.record(ProxyResult("http", self.fast.proxy, False), 169, policy)
+        self.assertEqual(history.state, "PROBATION")
+        history.record(ProxyResult("http", self.fast.proxy, False), 170, policy)
+        self.assertEqual(history.state, "DEGRADED")
+        history.record(self.fast, 180, policy)
         self.assertEqual(history.state, "PROBATION")
         self.assertEqual(history.consecutive_successes, 1)
+        self.assertIsNone(history.failure_since)
 
     def test_failure_tolerance_preserves_alive_origin(self):
         config = StabilityConfig(

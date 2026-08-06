@@ -57,6 +57,23 @@ class PersistenceTests(unittest.TestCase):
         )
         self.assertEqual(self.repository.connection.execute("SELECT count(*) FROM proxies").fetchone()[0], 0)
 
+    def test_stable_failure_grace_survives_restart(self):
+        result = ProxyResult("http", "1.2.3.4:80", True, 42, "France")
+        self.repository.save_checks(
+            [CheckObservation(result, 100, True, "PROBATION", "STABLE")], 20
+        )
+        failed = ProxyResult("http", result.proxy, False)
+        self.repository.save_checks(
+            [CheckObservation(failed, 110, False, "STABLE", "PROBATION", "failed", 110)], 20
+        )
+        history = self.repository.load_histories(
+            self.policy, retention_time=1000, restart_tolerance=20,
+            now_wall=130, now_mono=500,
+        )[result.key]
+        self.assertEqual(history.state, "PROBATION")
+        self.assertEqual(history.failure_since, 480)
+        self.assertTrue(history.restored)
+
     def test_long_restart_gap_resets_alive_but_keeps_rolling_checks(self):
         result = ProxyResult("http", "1.2.3.4:80", True, 42, "France")
         self.repository.save_checks(

@@ -292,7 +292,11 @@ class MonitorEngine:
         return (
             history.state in {"STABLE", "PROBATION"}
             and history.latest is not None
-            and (history.restored or (history.samples and history.samples[-1].ok))
+            and (
+                history.restored
+                or history.failure_since is not None
+                or (history.samples and history.samples[-1].ok)
+            )
         )
 
     def _expire_inactive(self, now):
@@ -331,8 +335,15 @@ class MonitorEngine:
             history.last_failure_at = checked_wall
         if self.repository is not None:
             reason = ", ".join(self.policy.blockers(history, checked_mono))
+            failure_since = (
+                checked_wall - (checked_mono - history.failure_since)
+                if history.failure_since is not None else None
+            )
             self._pending_observations.append(
-                CheckObservation(result, checked_wall, accepted, old_state, history.state, reason)
+                CheckObservation(
+                    result, checked_wall, accepted, old_state, history.state,
+                    reason, failure_since,
+                )
             )
             if len(self._pending_observations) >= 100:
                 self._flush()
