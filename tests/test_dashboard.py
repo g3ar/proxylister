@@ -46,6 +46,35 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(about, format_about())
             await pilot.press("escape")
 
+    async def test_q_and_ctrl_c_share_counted_graceful_shutdown(self):
+        for key in ("q", "ctrl+c"):
+            with self.subTest(key=key):
+                engine = Mock()
+                app = ProxyMonitorApp(engine, autostart=False)
+                async with app.run_test() as pilot:
+                    # Keep the test app visible so its shutdown status can be inspected.
+                    app.autostart = True
+                    await pilot.press(key)
+                    await pilot.pause()
+                    self.assertTrue(app.stopping)
+                    self.assertTrue(app.stop_event.is_set())
+                    engine.request_refresh.assert_called_once_with()
+                    status = str(app.query_one("#status", Static).content)
+                    self.assertEqual(status, "Finishing active work…")
+                    app.shutdown_progress(2, 5)
+                    status = str(app.query_one("#status", Static).content)
+                    self.assertEqual(
+                        status,
+                        "Finishing active work │ [████████░░░░░░░░░░░░]",
+                    )
+                    app.receive_snapshot(
+                        MonitorSnapshot(1, 0, 0, 0, 0, "waiting", 5, ())
+                    )
+                    self.assertEqual(
+                        str(app.query_one("#status", Static).content), status
+                    )
+                    app.exit()
+
     async def test_snapshot_populates_table_and_opens_details(self):
         engine = MonitorEngine(
             policy=StabilityPolicy(StabilityConfig()),

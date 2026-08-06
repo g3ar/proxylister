@@ -46,6 +46,7 @@ class ProxyMonitorApp(App):
     """
     BINDINGS = [
         Binding("q", "quit", "Quit"),
+        Binding("ctrl+c", "quit", show=False, priority=True),
         Binding("s", "states", "States"),
         Binding("p", "protocols", "Protocols"),
         Binding("c", "country_filter", "Country"),
@@ -109,6 +110,9 @@ class ProxyMonitorApp(App):
             self.engine.run(
                 self.stop_event,
                 lambda snapshot: self.call_from_thread(self.receive_snapshot, snapshot),
+                lambda completed, total: self.call_from_thread(
+                    self.shutdown_progress, completed, total
+                ),
             )
         finally:
             try:
@@ -121,6 +125,8 @@ class ProxyMonitorApp(App):
             self.exit()
 
     def receive_snapshot(self, snapshot: MonitorSnapshot):
+        if self.stopping:
+            return
         self.latest_snapshot = snapshot
         if snapshot.incremental:
             self.all_rows_by_key.update({
@@ -440,12 +446,17 @@ class ProxyMonitorApp(App):
         self.stopping = True
         self.stop_event.set()
         self.engine.request_refresh()
-        self.query_one("#status", Static).update(
-            "Stopping… waiting for active network requests to finish or reach their timeout."
-        )
-        self.notify("Stopping monitor…", timeout=3)
+        self.query_one("#status", Static).update("Finishing active work…")
         if not self.autostart:
             self.exit()
+
+    def shutdown_progress(self, completed, total):
+        if not self.stopping:
+            return
+        width = 20
+        filled = width if total == 0 else round(width * completed / total)
+        bar = "█" * filled + "░" * (width - filled)
+        self.query_one("#status", Static).update(f"Finishing active work │ [{bar}]")
 
     @staticmethod
     def _milliseconds(value):

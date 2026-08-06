@@ -9,7 +9,7 @@ observed through each proxy.
 
 Keyboard controls::
 
-    q  quit                 s  choose visible states
+    q / Ctrl+C  quit        s  choose visible states
     p  choose protocols     c  choose a country
     b  open selected proxy  y  copy connection string
     Enter  show selected proxy analytics

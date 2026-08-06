@@ -52,6 +52,58 @@ class MonitorEngineTests(unittest.TestCase):
         self.assertEqual(final.rows[0].country, "France")
         self.assertEqual(final.rows[0].blockers, ())
 
+    def test_shutdown_progress_counts_only_running_work(self):
+        stop = threading.Event()
+        check_started = threading.Event()
+        release_check = threading.Event()
+        progress_started = threading.Event()
+        progress = []
+
+        def checker(protocol, proxy, *_args):
+            check_started.set()
+            release_check.wait(2)
+            return ProxyResult(protocol, proxy, True, 50, "France")
+
+        def shutdown_progress(completed, total):
+            progress.append((completed, total))
+            progress_started.set()
+
+        engine = MonitorEngine(
+            policy=StabilityPolicy(StabilityConfig()),
+            workers=2,
+            timeout=1,
+            samples=1,
+            refresh_interval=1,
+            retention_time=60,
+            fetcher=lambda: [
+                ("http", "1.2.3.4:80"),
+                ("http", "2.3.4.5:80"),
+                ("http", "3.4.5.6:80"),
+            ],
+            checker=checker,
+        )
+        runner = threading.Thread(
+            target=engine.run,
+            args=(stop, lambda _snapshot: None, shutdown_progress),
+        )
+        runner.start()
+        self.assertTrue(check_started.wait(1))
+        stop.set()
+        self.assertTrue(progress_started.wait(1))
+        release_check.set()
+        runner.join(2)
+
+        self.assertFalse(runner.is_alive())
+        total = progress[0][1]
+        self.assertEqual(total, 1)
+        self.assertEqual(progress[0], (0, total))
+        self.assertEqual(progress[-1], (total, total))
+        self.assertEqual({reported_total for _, reported_total in progress}, {total})
+        self.assertEqual(
+            [completed for completed, _ in progress],
+            sorted(completed for completed, _ in progress),
+        )
+
     def test_active_lane_rechecks_saved_proxy_while_discovery_is_still_running(self):
         stop = threading.Event()
         checked_keys = []

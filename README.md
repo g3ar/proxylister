@@ -160,7 +160,7 @@ When a URL is configured, pressing `b` opens that same address through the selec
 | `c` | Search for and select a country |
 | `b` | Open the selected proxy in a private browser session |
 | `y` | Copy the selected connection string to the terminal clipboard |
-| `q` | Stop the monitor and quit |
+| `q` or `Ctrl+C` | Gracefully stop the monitor and quit |
 
 ### Inspect one proxy
 
@@ -203,7 +203,7 @@ Private browsing isolates the temporary session from the main profile. It is not
 
 ### Stop the monitor
 
-Press `q` to stop. The monitor displays shutdown progress, allows active network requests to finish or reach their configured timeout, preserves useful monitor state, and then exits.
+Press `q` or `Ctrl+C` to stop. Both use the same graceful shutdown path. Work that has not started is cancelled immediately. Checks and source work that are already running and therefore prevent the executors from closing become the fixed shutdown workload. A compact `Finishing active work` progress bar advances while they finish or reach their timeout. The monitor then preserves useful state and exits.
 
 ## About and credits
 

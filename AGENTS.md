@@ -99,7 +99,8 @@ Monitor controls currently include:
 - `b` — open the configured URL through the selected proxy in an isolated
   private browser session;
 - `y` — copy the selected connection string with OSC 52;
-- `q` — display shutdown progress, finish bounded active work, and exit.
+- `q` or `Ctrl+C` — display live shutdown progress, finish bounded active work,
+  and exit through the same graceful path.
 
 Do not reintroduce removed controls such as `d` or `r`. The TUI stays compact:
 State, Country, Median, Alive, and Connection. City, Exit IP, blockers,

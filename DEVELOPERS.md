@@ -237,6 +237,14 @@ Alive, and Connection. Detailed proxy analytics belong in the `Enter` modal,
 not additional permanent columns or a separate debug mode. The `y` action uses
 Textual's OSC 52 support; do not add platform clipboard dependencies.
 
+`q` and `Ctrl+C` deliberately call the same graceful shutdown action. Do not
+restore Textual's default `Ctrl+C` help behavior or exit the app before engine
+workers finish. At shutdown, the engine first cancels queued futures, then
+captures only already-running futures that can delay executor shutdown as one
+fixed workload. Keep the status line limited to `Finishing active work` and its
+progress bar; counters, elapsed time, and transient notifications are not useful
+shutdown feedback.
+
 ## Stability model
 
 `ProxyHistory` stores a bounded deque of `CheckSample` values. Each sample has

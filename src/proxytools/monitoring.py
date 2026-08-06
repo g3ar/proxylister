@@ -166,7 +166,12 @@ class MonitorEngine:
             resort=resort,
         )
 
-    def run(self, stop: threading.Event, publish: Callable[[MonitorSnapshot], None]):
+    def run(
+        self,
+        stop: threading.Event,
+        publish: Callable[[MonitorSnapshot], None],
+        shutdown_progress: Callable[[int, int], None] | None = None,
+    ):
         self.cycle = 1
         active_workers = max(1, round(self.workers * 0.2))
         discovery_workers = max(1, self.workers - active_workers)
@@ -289,6 +294,25 @@ class MonitorEngine:
                     self.repository.prune_checks(time.time() - 86400)
                     last_pruned_cycle = self.cycle
         finally:
+            unfinished = set(active_pending) | set(discovery_pending)
+            if source_future is not None:
+                unfinished.add(source_future)
+            unfinished = {future for future in unfinished if not future.done()}
+            for future in unfinished:
+                future.cancel()
+            blocking = {future for future in unfinished if not future.done()}
+            total = len(blocking)
+            if shutdown_progress is not None:
+                shutdown_progress(0, total)
+            while blocking:
+                done, _ = concurrent.futures.wait(
+                    blocking,
+                    timeout=0.1,
+                    return_when=concurrent.futures.FIRST_COMPLETED,
+                )
+                blocking.difference_update(done)
+                if shutdown_progress is not None:
+                    shutdown_progress(total - len(blocking), total)
             active_pool.shutdown(wait=True, cancel_futures=True)
             discovery_pool.shutdown(wait=True, cancel_futures=True)
             source_pool.shutdown(wait=True, cancel_futures=True)
