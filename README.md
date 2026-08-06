@@ -80,7 +80,9 @@ Runs forever and keeps a rolling check history for each proxy. New candidates st
 
 Monitor state is stored in `proxytools.db` beside the root launcher. Each clone therefore has an independent database. Only working `STABLE` and `PROBATION` proxies are retained between runs; a failed or `DEGRADED` proxy and its detailed history are removed. Recent checks restore the rolling history after a restart, but a pause longer than twice `--refresh-interval` is not counted as continuous uptime. Details for retained proxies are pruned after 24 hours while their aggregates and transitions remain. SQLite WAL companion files are expected while the monitor is running. All database and lock files are ignored by Git.
 
-At startup, saved proxies and their last known statuses are loaded before any ProxyScrape request. A `*` on a status means it came from the database and is awaiting verification. Saved proxies are checked first; then ProxyScrape is fetched and only newly discovered addresses are checked, so an overlapping proxy is never checked twice in the startup cycle. The normal refresh cycles begin afterward.
+At startup, saved proxies and their last known statuses are shown immediately. A `*` on a status means it came from the database and is awaiting verification. Their active checks start at once while ProxyScrape is fetched independently; overlap protection prevents the same proxy from running in both lanes simultaneously.
+
+During long-running monitoring, checks use two independent lanes. Roughly 20% of `--workers` are reserved for active `STABLE`/`PROBATION` proxies and run every `--refresh-interval`; the remaining workers discover proxies from ProxyScrape in parallel. A successful discovery candidate joins the active lane immediately, so probation progress is not blocked by a large discovery backlog. The status bar reports both lane counters. With `--workers 1`, each lane receives one worker so neither can starve the other.
 
 ```bash
 ./proxytools monitor --timeout 5 --workers 50 --max-latency 500 --min-alive-time 60

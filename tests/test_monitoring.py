@@ -15,7 +15,7 @@ class MonitorEngineTests(unittest.TestCase):
 
         def publish(snapshot):
             snapshots.append(snapshot)
-            if snapshot.phase == "checking" and snapshot.checked == 1:
+            if snapshot.phase == "running" and snapshot.stable_count == 1:
                 stop.set()
 
         engine = MonitorEngine(
@@ -38,29 +38,31 @@ class MonitorEngineTests(unittest.TestCase):
         self.assertEqual(final.rows[0].country, "France")
         self.assertEqual(final.rows[0].blockers, ())
 
-    def test_saved_proxies_are_checked_before_new_source_entries_without_duplicates(self):
+    def test_active_lane_rechecks_saved_proxy_while_discovery_is_still_running(self):
         stop = threading.Event()
         checked_keys = []
-        phases = []
+        saved_checks = 0
         policy = StabilityPolicy(
             StabilityConfig(min_checks=1, min_success_streak=1, min_alive_time=0)
         )
 
         def checker(protocol, proxy, *_args):
+            nonlocal saved_checks
             checked_keys.append((protocol, proxy))
+            if proxy == "1.2.3.4:80":
+                saved_checks += 1
+                if saved_checks >= 2:
+                    stop.set()
+            else:
+                stop.wait(0.5)
             return ProxyResult(protocol, proxy, True, 50, "France")
-
-        def publish(snapshot):
-            phases.append(snapshot.phase)
-            if snapshot.phase == "checking_new" and snapshot.checked == 1:
-                stop.set()
 
         engine = MonitorEngine(
             policy=policy,
             workers=1,
             timeout=1,
             samples=1,
-            refresh_interval=1,
+            refresh_interval=0.05,
             retention_time=60,
             fetcher=lambda: [("http", "1.2.3.4:80"), ("http", "5.6.7.8:80")],
             checker=checker,
@@ -69,14 +71,10 @@ class MonitorEngineTests(unittest.TestCase):
         saved.latest = ProxyResult("http", saved.proxy, True, 40, "France")
         saved.restored = True
         engine.histories[saved.key] = saved
-        engine.run(stop, publish)
+        engine.run(stop, lambda snapshot: None)
 
-        self.assertEqual(
-            checked_keys,
-            [("http", "1.2.3.4:80"), ("http", "5.6.7.8:80")],
-        )
-        self.assertLess(phases.index("restoring"), phases.index("fetching"))
-        self.assertLess(phases.index("fetching"), phases.index("checking_new"))
+        self.assertGreaterEqual(checked_keys.count(("http", "1.2.3.4:80")), 2)
+        self.assertIn(("http", "5.6.7.8:80"), checked_keys)
 
     def test_browser_url_is_checked_with_requests_after_proxy_succeeds(self):
         engine = MonitorEngine(

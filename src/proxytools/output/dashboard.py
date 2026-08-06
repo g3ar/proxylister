@@ -200,8 +200,8 @@ class ProxyMonitorApp(App):
             return
         if (
             snapshot.incremental
-            and 0 < snapshot.checked < snapshot.total
-            and snapshot.phase in {"restoring", "checking_new", "checking"}
+            and (0 < snapshot.checked < snapshot.total or snapshot.phase == "running")
+            and snapshot.phase in {"restoring", "checking_new", "checking", "running"}
         ):
             self.render_changed_rows(snapshot)
             return
@@ -229,6 +229,8 @@ class ProxyMonitorApp(App):
             self.rows_by_key[key] = row
             self.cells_by_key[key] = cells
         self._render_status(snapshot, len(self.rows_by_key))
+        if snapshot.resort:
+            table.sort("state", "median", key=self._monitor_sort_key)
 
         if table.row_count:
             selected = str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
@@ -283,6 +285,10 @@ class ProxyMonitorApp(App):
 
     def _render_status(self, snapshot: MonitorSnapshot, visible: int):
         phase = {
+            "running": (
+                f"Active {snapshot.active_checked}/{snapshot.active_total} │ "
+                f"Discovery {snapshot.discovery_checked}/{snapshot.discovery_total}"
+            ),
             "restoring": f"Rechecking saved proxies {snapshot.checked}/{snapshot.total}",
             "fetching": "Fetching ProxyScrape lists…",
             "checking_new": f"Checking new proxies {snapshot.checked}/{snapshot.total}",

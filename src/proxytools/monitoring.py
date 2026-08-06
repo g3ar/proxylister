@@ -11,7 +11,7 @@ from typing import Callable
 from proxytools.checking import check_proxy, check_url, connection_string
 from proxytools.sources.proxyscrape import fetch_all_proxies
 from proxytools.stability import StabilityPolicy
-from proxytools.stability.history import expire_histories, update_advertised
+from proxytools.stability.history import update_advertised
 from proxytools.storage import CheckObservation
 
 
@@ -49,6 +49,11 @@ class MonitorSnapshot:
     rows: tuple[MonitorRow, ...]
     changed_rows: tuple[MonitorRow, ...] = ()
     incremental: bool = False
+    active_checked: int = 0
+    active_total: int = 0
+    discovery_checked: int = 0
+    discovery_total: int = 0
+    resort: bool = False
 
 
 class MonitorEngine:
@@ -90,10 +95,14 @@ class MonitorEngine:
     def request_refresh(self):
         self._refresh_requested.set()
 
-    def snapshot(self, checked=0, total=0, phase="idle", next_cycle_in=None, changed_keys=None):
+    def snapshot(
+        self, checked=0, total=0, phase="idle", next_cycle_in=None,
+        changed_keys=None, *, active_checked=0, active_total=0,
+        discovery_checked=0, discovery_total=0, resort=False,
+    ):
         now = time.monotonic()
         changed_keys = set(changed_keys or ())
-        incremental = bool(changed_keys) and checked < total
+        incremental = bool(changed_keys) and (checked < total or phase == "running")
         histories = (
             (self.histories[key] for key in changed_keys if key in self.histories)
             if incremental else self.histories.values()
@@ -143,85 +152,157 @@ class MonitorEngine:
             rows=row_tuple,
             changed_rows=row_tuple if incremental else (),
             incremental=incremental,
+            active_checked=active_checked,
+            active_total=active_total,
+            discovery_checked=discovery_checked,
+            discovery_total=discovery_total,
+            resort=resort,
         )
 
     def run(self, stop: threading.Event, publish: Callable[[MonitorSnapshot], None]):
         self.cycle = 1
-        saved_keys = set(self.histories)
-        if saved_keys:
-            self._check_candidates(
-                list(self.histories), stop, publish, phase="restoring"
-            )
-        first_source_cycle = True
-        while not stop.is_set():
-            self._refresh_requested.clear()
-            publish(self.snapshot(phase="fetching"))
-            entries = self.fetcher()
-            now = time.monotonic()
-            update_advertised(self.histories, entries, now, self.policy.config.history_size)
-            expire_histories(self.histories, now, self.retention_time)
-            if first_source_cycle:
-                candidates = [key for key in entries if key not in saved_keys]
-                phase = "checking_new"
-            else:
-                candidates = list(self.histories)
-                phase = "checking"
-            checked = self._check_candidates(candidates, stop, publish, phase=phase)
-            if self.repository is not None and self.cycle % 10 == 0:
-                self.repository.prune_checks(time.time() - 86400)
-            if stop.is_set():
-                break
-
-            deadline = time.monotonic() + self.refresh_interval
-            previous_second = None
-            while not stop.is_set() and not self._refresh_requested.is_set():
-                remaining = max(0, deadline - time.monotonic())
-                second = int(remaining)
-                if second != previous_second:
-                    publish(self.snapshot(checked, len(candidates), "waiting", second))
-                    previous_second = second
-                if remaining <= 0:
-                    break
-                stop.wait(min(0.2, remaining))
-            first_source_cycle = False
-            self.cycle += 1
-
-    def _check_candidates(self, candidates, stop, publish, *, phase):
-        """Check one ordered candidate batch and publish incremental progress."""
-        checked = 0
+        active_workers = max(1, round(self.workers * 0.2))
+        discovery_workers = max(1, self.workers - active_workers)
+        active_pool = concurrent.futures.ThreadPoolExecutor(max_workers=active_workers)
+        discovery_pool = concurrent.futures.ThreadPoolExecutor(max_workers=discovery_workers)
+        source_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        active_pending = {}
+        discovery_pending = {}
+        source_future = source_pool.submit(self.fetcher)
+        active_checked = active_total = discovery_checked = discovery_total = 0
+        next_active_at = time.monotonic()
+        next_source_at = float("inf")
         last_publish_at = 0.0
-        changed_keys = set()
-        publish(self.snapshot(checked, len(candidates), phase))
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=self.workers)
-        pending = {
-            executor.submit(self._check_candidate, protocol, proxy)
-            for protocol, proxy in candidates
-        }
+        last_flush_at = time.monotonic()
+        dirty_keys = set()
+        last_pruned_cycle = 0
+        publish(self.snapshot(phase="running"))
         try:
-            while pending and not stop.is_set():
-                done, pending = concurrent.futures.wait(
-                    pending,
-                    timeout=0.1,
-                    return_when=concurrent.futures.FIRST_COMPLETED,
-                )
+            while not stop.is_set():
+                now = time.monotonic()
+                if self._refresh_requested.is_set():
+                    self._refresh_requested.clear()
+                    next_active_at = now
+                    if source_future is None and not discovery_pending:
+                        next_source_at = now
+                if now >= next_active_at and not active_pending:
+                    active_keys = [
+                        key for key, history in self.histories.items()
+                        if self._is_active(history) and key not in discovery_pending
+                    ]
+                    active_pending = {
+                        active_pool.submit(self._check_candidate, *key): key for key in active_keys
+                    }
+                    active_checked, active_total = 0, len(active_keys)
+                    next_active_at = now + self.refresh_interval
+
+                if source_future is not None and source_future.done():
+                    entries = source_future.result()
+                    source_future = None
+                    advertised_at = time.monotonic()
+                    update_advertised(
+                        self.histories, entries, advertised_at, self.policy.config.history_size
+                    )
+                    self._expire_inactive(advertised_at)
+                    active_keys = {
+                        key for key, history in self.histories.items() if self._is_active(history)
+                    }
+                    candidates = [
+                        key for key in entries
+                        if key not in active_keys
+                        and key not in active_pending.values()
+                        and key not in discovery_pending.values()
+                    ]
+                    discovery_pending = {
+                        discovery_pool.submit(self._check_candidate, *key): key for key in candidates
+                    }
+                    discovery_checked, discovery_total = 0, len(candidates)
+                    if not candidates:
+                        next_source_at = advertised_at + self.refresh_interval
+
+                if (
+                    source_future is None and not discovery_pending
+                    and time.monotonic() >= next_source_at
+                ):
+                    source_future = source_pool.submit(self.fetcher)
+                    next_source_at = float("inf")
+                    self.cycle += 1
+
+                all_pending = set(active_pending) | set(discovery_pending)
+                done = set()
+                if all_pending:
+                    done, _ = concurrent.futures.wait(
+                        all_pending, timeout=0.1,
+                        return_when=concurrent.futures.FIRST_COMPLETED,
+                    )
+                else:
+                    stop.wait(0.1)
+
+                resort = False
                 for future in done:
+                    if future in active_pending:
+                        key = active_pending.pop(future)
+                        active_checked += 1
+                        lane_finished = not active_pending
+                    else:
+                        key = discovery_pending.pop(future)
+                        discovery_checked += 1
+                        lane_finished = not discovery_pending
+                        if lane_finished:
+                            next_source_at = time.monotonic() + self.refresh_interval
                     result = future.result()
-                    checked += 1
-                    history = self.histories.get(result.key)
+                    history = self.histories.get(key)
                     if history is not None:
                         self._record_result(history, result)
-                        changed_keys.add(result.key)
+                        dirty_keys.add(key)
+                    resort = resort or lane_finished
+
                 publish_now = time.monotonic()
-                if done and (checked == len(candidates) or publish_now - last_publish_at >= 0.2):
-                    publish(self.snapshot(checked, len(candidates), phase, changed_keys=changed_keys))
-                    changed_keys.clear()
+                if dirty_keys and (resort or publish_now - last_publish_at >= 0.2):
+                    publish(self.snapshot(
+                        active_checked + discovery_checked,
+                        active_total + discovery_total,
+                        "running",
+                        changed_keys=dirty_keys,
+                        active_checked=active_checked,
+                        active_total=active_total,
+                        discovery_checked=discovery_checked,
+                        discovery_total=discovery_total,
+                        resort=resort,
+                    ))
+                    dirty_keys.clear()
                     last_publish_at = publish_now
+                if publish_now - last_flush_at >= 1:
+                    self._flush()
+                    last_flush_at = publish_now
+                if (
+                    self.repository is not None and self.cycle % 10 == 0
+                    and self.cycle != last_pruned_cycle
+                ):
+                    self.repository.prune_checks(time.time() - 86400)
+                    last_pruned_cycle = self.cycle
         finally:
-            # Running requests cannot be force-cancelled safely. During
-            # shutdown wait here while the TUI still displays its message.
-            executor.shutdown(wait=stop.is_set(), cancel_futures=True)
-        self._flush()
-        return checked
+            active_pool.shutdown(wait=True, cancel_futures=True)
+            discovery_pool.shutdown(wait=True, cancel_futures=True)
+            source_pool.shutdown(wait=True, cancel_futures=True)
+            self._flush()
+
+    @staticmethod
+    def _is_active(history):
+        return (
+            history.state in {"STABLE", "PROBATION"}
+            and history.latest is not None
+            and (history.restored or (history.samples and history.samples[-1].ok))
+        )
+
+    def _expire_inactive(self, now):
+        expired = [
+            key for key, history in self.histories.items()
+            if not self._is_active(history)
+            and now - history.last_advertised_at > self.retention_time
+        ]
+        for key in expired:
+            del self.histories[key]
 
     def _check_candidate(self, protocol, proxy):
         """Run the normal proxy check and optional lightweight target request."""
