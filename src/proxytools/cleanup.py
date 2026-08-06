@@ -16,6 +16,9 @@ from proxytools.paths import lock_path, tool_home
 from proxytools.process_lock import AlreadyRunning, ProcessLock
 
 RUNTIME_FILES = (
+    "proxydb/proxytools.db",
+    "proxydb/proxytools.db-wal",
+    "proxydb/proxytools.db-shm",
     "proxytools.db",
     "proxytools.db-wal",
     "proxytools.db-shm",
@@ -25,6 +28,7 @@ RUNTIME_FILES = (
     ".coverage",
 )
 RUNTIME_DIRECTORIES = (
+    "geodb",
     ".venv",
     ".pytest_cache",
     ".mypy_cache",
@@ -62,6 +66,10 @@ def clear_runtime(home: Path | None = None) -> list[Path]:
                 _remove(path, removed)
     for path in home.glob(".proxytools-geoip-*"):
         _remove(path, removed)
+    proxy_directory = home / "proxydb"
+    if proxy_directory.is_dir() and not any(proxy_directory.iterdir()):
+        proxy_directory.rmdir()
+        removed.append(proxy_directory)
     return removed
 
 
@@ -75,6 +83,10 @@ def main() -> int:
         print(f"proxytools: refusing to clear: {error}", file=sys.stderr)
         return 1
     lock.unlink(missing_ok=True)
+    try:
+        lock.parent.rmdir()
+    except OSError:
+        pass
     if removed:
         print(f"Removed {len(removed)} generated artifact(s). Local state cannot be recovered.")
     else:

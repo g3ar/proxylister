@@ -77,7 +77,7 @@ Progress and diagnostics go to stderr, so redirection and pipelines remain clean
 
 Runs forever and keeps a rolling check history for each proxy. New candidates start in `PROBATION`, become `STABLE` only after satisfying every configured time and quality threshold, and change to `DEGRADED` after a failure. Green, yellow, and red rows represent those states.
 
-Monitor state is stored in `proxytools.db` beside the root launcher. Each clone therefore has an independent database. Only working `STABLE` and `PROBATION` proxies are retained between runs; a failed or `DEGRADED` proxy and its detailed history are removed. Recent checks restore the rolling history after a restart, but a pause longer than twice `MONITOR_REFRESH_INTERVAL` is not counted as continuous uptime. Details for retained proxies are pruned after 24 hours while their aggregates and transitions remain. SQLite WAL companion files are expected while the monitor is running. All database and lock files are ignored by Git.
+Monitor state is stored under `proxydb/` beside the root launcher. The directory contains `proxytools.db`, its normal SQLite WAL/SHM companions, and the per-clone process lock. Each clone therefore has independent runtime state while its root remains clean. Only working `STABLE` and `PROBATION` proxies are retained between runs; a failed or `DEGRADED` proxy and its detailed history are removed. Recent checks restore the rolling history after a restart, but a pause longer than twice `MONITOR_REFRESH_INTERVAL` is not counted as continuous uptime. Details for retained proxies are pruned after 24 hours while their aggregates and transitions remain. The complete directory is ignored by Git.
 
 At startup, saved proxies and their last known statuses are shown immediately. A `*` on a status means it came from the database and is awaiting verification. Their active checks start at once while ProxyScrape is fetched independently; overlap protection prevents the same proxy from running in both lanes simultaneously.
 
@@ -101,7 +101,7 @@ When `URL` is configured or `--url` is supplied, every otherwise successful prox
 
 The Textual table is scrollable, supports row selection, and updates a detail panel for the highlighted proxy. Its default view shows state, country, continuous live time, total observed uptime, first seen and last failure times, check count, success streak, rolling success rate, median latency, p95 latency, jitter, and connection string. `--debug` additionally shows City, Exit IP, and `Blocked by`. Each base sample makes one HTTPS request to the neutral `api.ipify.org` identity endpoint through the proxy. The returned exit IP is therefore measured on the same HTTPS route a browser uses, while country, city, and coordinates are resolved locally rather than accepted from the identity service. `Blocked by` explains why a row is not yet stable: `alive`, `checks`, `rate`, `streak`, `latency`, `jitter`, `url`, or `failed`. A status bar reports the current phase, cycle progress, tracked/stable counts, and active filters. A proxy that disappears from ProxyScrape continues to be checked until `MONITOR_RETENTION_TIME` expires.
 
-On each real `list` or `monitor` start, Proxy Tools checks the monthly DB-IP City Lite database stored as `proxytools-geoip.mmdb` beside the launcher. A missing or outdated database is downloaded over HTTPS, validated, decompressed, and atomically replaced; both the database and its version marker are ignored by Git. If an update fails, the existing database remains usable. With no local database, checks continue and locations are reported as `Unknown`. GeoIP data attribution: [IP Geolocation by DB-IP](https://db-ip.com).
+On each real `list` or `monitor` start, Proxy Tools checks the monthly DB-IP City Lite database stored as `geodb/geoip.mmdb`; its month marker is `geodb/version`. A missing or outdated database is downloaded over HTTPS, validated, decompressed, and atomically replaced. The complete directory is ignored by Git. If an update fails, the existing database remains usable. With no local database, checks continue and locations are reported as `Unknown`. GeoIP data attribution: [IP Geolocation by DB-IP](https://db-ip.com).
 
 Only one working command (`list` or `monitor`) may run from a given clone at a time. The kernel-backed `proxytools.lock` is released automatically even after a crash. Separate clones use separate locks and databases and can run simultaneously. Help and version commands never acquire the lock.
 
@@ -123,6 +123,8 @@ the independent domain and adapter layers:
 ```text
 proxytools                 root launcher and environment bootstrap
 proxytools.conf            commented host/runtime defaults
+proxydb/                  ignored proxy state, SQLite companions, and lock
+geodb/                    ignored GeoIP database and version marker
 pyproject.toml             package metadata and installed console script
 src/proxytools/
   cli.py                   top-level command dispatcher

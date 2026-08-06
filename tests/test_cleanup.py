@@ -20,6 +20,13 @@ class CleanupTests(unittest.TestCase):
             )
             for name in generated_files:
                 (home / name).write_text("generated")
+            for name in (
+                "proxydb/proxytools.db", "proxydb/proxytools.db-wal",
+                "proxydb/proxytools.db-shm", "geodb/geoip.mmdb", "geodb/version",
+            ):
+                path = home / name
+                path.parent.mkdir(exist_ok=True)
+                path.write_text("generated")
             for name in (".venv", ".pytest_cache", "build", "src/pkg/__pycache__"):
                 path = home / name
                 path.mkdir(parents=True)
@@ -35,6 +42,8 @@ class CleanupTests(unittest.TestCase):
             self.assertFalse((home / ".venv").exists())
             self.assertFalse((home / "src/pkg/__pycache__").exists())
             self.assertFalse((home / ".proxytools-geoip-interrupted").exists())
+            self.assertFalse((home / "proxydb").exists())
+            self.assertFalse((home / "geodb").exists())
             self.assertTrue((home / ".env").exists())
             self.assertTrue((home / "results.txt").exists())
 
@@ -42,7 +51,8 @@ class CleanupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, patch.dict(
             os.environ, {"PROXYTOOLS_HOME": directory}
         ):
-            database = Path(directory) / "proxytools.db"
+            database = Path(directory) / "proxydb" / "proxytools.db"
+            database.parent.mkdir()
             database.write_text("keep")
             output = io.StringIO()
             with ProcessLock("monitor"), contextlib.redirect_stderr(output):

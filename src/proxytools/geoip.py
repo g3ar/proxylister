@@ -1,7 +1,7 @@
 """Download DB-IP Lite safely and resolve exit IPs from its local MMDB file.
 
-The database is runtime state, not source code: it lives beside the root
-``proxytools`` launcher, is refreshed once per published calendar month, and
+The database is runtime state, not source code: it lives under ``geodb/``
+beside the root launcher, is refreshed once per published calendar month, and
 is replaced atomically only after the compressed download can be opened as a
 valid MaxMind-format database. Lookups are local and safe to call concurrently
 from monitor worker threads.
