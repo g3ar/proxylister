@@ -38,7 +38,7 @@ def build_parser(prog="proxytools monitor", settings=None):
     parser = argparse.ArgumentParser(prog=prog, description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
         "--debug", action="store_true",
-        help="Show City, Exit IP, Blocked by, and route diagnostics",
+        help="Show City, Exit IP, and Blocked by diagnostics",
     )
     parser.add_argument(
         "--url", type=web_url, default=settings.url,

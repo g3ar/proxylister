@@ -1,155 +1,328 @@
 # Proxy Tools
 
-`proxytools` is a single CLI application for working with free proxies from [ProxyScrape](https://proxyscrape.com/free-proxy-list). It provides two modes:
+Proxy Tools finds public HTTP, SOCKS4, and SOCKS5 proxies, verifies them through a real HTTPS connection, measures latency, identifies the exit IP and country, and can continue monitoring promising proxies until they prove stable.
 
-- **`list`** — one-shot fetch, check, geolocation, and stdout output; this is the default.
-- **`monitor`** — continuous stability monitoring in a live terminal dashboard.
+The project has one entrypoint and two modes:
 
-## Requirements
+- `list` performs a single scan and prints usable proxy addresses;
+- `monitor` continuously checks proxies in an interactive terminal interface.
 
-- Python 3.10+
-- `requests[socks]` (includes PySocks for `socks4`/`socks5` proxies)
-- `selenium>=4.10` is installed with the base dependencies but used only by `list --browser-check`. Google Chrome is required for that mode; Selenium Manager downloads a matching ChromeDriver automatically.
-- Rich provides progress and status output for non-interactive commands.
-- Textual provides the interactive `monitor` dashboard.
+The default mode is `list`, so `./proxytools` works immediately after cloning.
 
-## Installation
+## Quick start
 
-Clone the repository and use the single root launcher:
+Requirements:
+
+- Linux;
+- Python 3.10 or newer with the `venv` module;
+- internet access;
+- Chrome or Chromium only when Selenium validation is requested;
+- Chrome/Chromium or Firefox for the monitor's interactive browser action.
+
+Clone the project and run it:
 
 ```bash
 git clone <repository-url>
 cd proxylister
-./proxytools --help
+./proxytools
 ```
 
-On the first real command, `./proxytools` creates an ignored `.venv` and installs the project and all dependencies declared in `pyproject.toml`. That file is the single dependency manifest. Selenium is imported and invoked only when `list --browser-check` is requested. Python 3 with the standard `venv` module must be available on the host.
+On the first real run, the launcher creates a local `.venv` and installs the required Python packages. Nothing needs to be installed manually with `pip`.
 
-`./proxytools` is the only supported user-facing entrypoint:
+Useful help commands:
 
 ```bash
+./proxytools --help
 ./proxytools list --help
 ./proxytools monitor --help
+./proxytools --version
 ```
 
-To return a clone to its just-cloned runtime state, run `./proxytools --clear`. It refuses to run while another Proxy Tools command owns the clone lock, then removes the local virtual environment, SQLite and GeoIP databases, legacy `working_proxies.txt` output, lock file, Python bytecode, test caches, and build artifacts. Source files, Git metadata, `.env` files, and redirected user output are preserved. Removed local state is not recoverable.
+## Typical use cases
 
-## Configuration
-
-Technical defaults live in the tracked `proxytools.conf` beside the launcher. It is a strict, flat `KEY=value` file with detailed `#` comments for every setting. Unknown keys, duplicates, missing keys, invalid types, and invalid ranges stop startup with a configuration error. The file is parsed as data and is never sourced or executed as shell code. CLI values override `URL` and `MAX_LATENCY` for one invocation.
-
-## `list`
-
-Fetches proxies for all protocols (`http`, `socks4`, `socks5`), dedupes them, checks which are alive concurrently, geolocates each, and prints those under `--max-latency` to stdout, sorted fastest first. Omitting the mode is equivalent to `list`.
+### Get a plain list of working proxies
 
 ```bash
-./proxytools --max-latency 500 > working.txt
+./proxytools
 ```
 
-### Options
-
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--max-latency` | Only keep proxies faster than this (ms) | `MAX_LATENCY` |
-| `--url` | URL every proxy must reach through a lightweight request | `URL` |
-| `--debug` | Print detailed metadata instead of connection strings | off |
-| `--browser-check` | Additionally validate `--url` with Selenium | off |
-| `--headless` | Hide the Selenium browser used by `--browser-check` | off |
-
-Press **Ctrl+C** any time to stop early. Confirmed results collected so far are still printed.
-
-### Output
-
-Normal stdout contains one directly usable connection string per line:
+Normal output contains one connection string per line, sorted by latency:
 
 ```text
 http://203.0.113.10:8080
 socks5://198.51.100.20:1080
 ```
 
-Progress and diagnostics go to stderr, so redirection and pipelines remain clean. `--debug` changes stdout rows to the detailed latency, protocol, country, coordinates, and maps representation.
-
-### `--url` and `--browser-check`
-
-`--url` applies the same lightweight requests-based target check used by monitor. Add `--browser-check` for a second Selenium validation in one Chrome instance at a time. A proxy is dropped if the page fails to load, Chrome shows an internal network-error page, or the main document has an HTTP error status. On success a visible window stays open for 10 seconds so the result can be inspected; `--headless` hides it and skips that delay. The page-load timeout is `2 × --max-latency`, floored at 10s. Both `--browser-check` and `--headless` require the preceding options they operate on.
-
-## `monitor`
-
-Runs forever and keeps a rolling check history for each proxy. New candidates start in `PROBATION`, become `STABLE` only after satisfying every configured time and quality threshold, and change to `DEGRADED` after a failure. Green, yellow, and red rows represent those states.
-
-Monitor state is stored under `proxydb/` beside the root launcher. The directory contains `proxytools.db`, its normal SQLite WAL/SHM companions, and the per-clone process lock. Each clone therefore has independent runtime state while its root remains clean. Only working `STABLE` and `PROBATION` proxies are retained between runs; a failed or `DEGRADED` proxy and its detailed history are removed. Recent checks restore the rolling history after a restart, but a pause longer than twice `MONITOR_REFRESH_INTERVAL` is not counted as continuous uptime. Details for retained proxies are pruned after 24 hours while their aggregates and transitions remain. The complete directory is ignored by Git.
-
-At startup, saved proxies and their last known statuses are shown immediately. A `*` on a status means it came from the database and is awaiting verification. Their active checks start at once while ProxyScrape is fetched independently; overlap protection prevents the same proxy from running in both lanes simultaneously.
-
-During long-running monitoring, checks use two independent lanes. Roughly 20% of `WORKERS` are reserved for active `STABLE`/`PROBATION` proxies and run every `MONITOR_REFRESH_INTERVAL`; the remaining workers discover proxies from ProxyScrape in parallel. A successful discovery candidate joins the active lane immediately, so probation progress is not blocked by a large discovery backlog. The status bar reports both lane counters. With `WORKERS=1`, each lane receives one worker so neither can starve the other.
+Progress is written to stderr, while proxy addresses are written to stdout. This makes redirection and pipelines safe:
 
 ```bash
-./proxytools monitor --max-latency 500
+./proxytools > working-proxies.txt
+./proxytools | head -n 10
 ```
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--max-latency` | Only admit proxies faster than this (ms) | `MAX_LATENCY` |
-| `--debug` | Show City, Exit IP, and Blocked by diagnostics | off |
-| `--url` | HTTP(S) URL every proxy must reach; also opened by `b` | `URL` |
-
-**Controls:** arrow keys select and scroll rows, `q` quits, `s` opens a multi-select state picker, `p` opens a multi-select protocol picker, `c` opens a searchable country picker, and `b` opens the selected proxy in a disposable private browser session. By default the table shows stable and probationary proxies while degraded proxies are hidden. State, protocol, and exact-country filters combine; choose `All countries` to clear the country filter. Rows update in place while checks run and are reordered only after an active-pool pass completes. Textual's footer always shows the active bindings.
-
-The browser action uses `MONITOR_BROWSER` from the config. In `auto` mode it detects Chrome/Chromium first and Firefox second. Chrome runs with incognito mode and a temporary user-data directory; Firefox runs in private mode with a generated temporary profile. Both receive the selected HTTP, SOCKS4, or SOCKS5 proxy without reading or changing the normal browser profile. Only one browser session can be launched by a monitor at a time. The browser may outlive the monitor; its detached lifecycle helper removes the temporary profile after the browser closes.
-
-When `URL` is configured or `--url` is supplied, every otherwise successful proxy check makes one additional lightweight `requests` request to that URL through the same proxy. HTTP 2xx/3xx passes. Monitor also accepts HTTP 403 because anti-bot sites may reject `requests` while remaining usable in the interactive browser; other 4xx/5xx responses, timeout, TLS, proxy, and redirect errors fail with the `url` blocker. This happens once after the configured proxy samples and never invokes Selenium. Without a URL there is no target request and `b` opens `about:blank`.
-
-The Textual table is scrollable, supports row selection, and updates a detail panel for the highlighted proxy. Its default view shows state, country, continuous live time, total observed uptime, first seen and last failure times, check count, success streak, rolling success rate, median latency, p95 latency, jitter, and connection string. `--debug` additionally shows City, Exit IP, and `Blocked by`. Each base sample makes one HTTPS request to the neutral `api.ipify.org` identity endpoint through the proxy. The returned exit IP is therefore measured on the same HTTPS route a browser uses, while country, city, and coordinates are resolved locally rather than accepted from the identity service. `Blocked by` explains why a row is not yet stable: `alive`, `checks`, `rate`, `streak`, `latency`, `jitter`, `url`, or `failed`. A status bar reports the current phase, cycle progress, tracked/stable counts, and active filters. A proxy that disappears from ProxyScrape continues to be checked until `MONITOR_RETENTION_TIME` expires.
-
-On each real `list` or `monitor` start, Proxy Tools checks the monthly DB-IP City Lite database stored as `geodb/geoip.mmdb`; its month marker is `geodb/version`. A missing or outdated database is downloaded over HTTPS, validated, decompressed, and atomically replaced. The complete directory is ignored by Git. If an update fails, the existing database remains usable. With no local database, checks continue and locations are reported as `Unknown`. GeoIP data attribution: [IP Geolocation by DB-IP](https://db-ip.com).
-
-Only one working command (`list` or `monitor`) may run from a given clone at a time. The kernel-backed `proxytools.lock` is released automatically even after a crash. Separate clones use separate locks and databases and can run simultaneously. Help and version commands never acquire the lock.
-
-A new proxy must respond below `MAX_LATENCY` (or its CLI override) to qualify as `STABLE`. Once admitted, a slow response remains a quality miss in its rolling history but does not mean the proxy is dead or demote it by itself. By default, `STABLE` survives the number of hard failures configured by `MONITOR_ALIVE_FAILURE_TOLERANCE`; the next failure moves it to `PROBATION`, resets continuous live time, and starts the `MONITOR_DEGRADED_AFTER` grace period. Continued hard failures after that period produce `DEGRADED`, while one clean check restores a previously stable proxy immediately. Recovery metadata and the grace timer are stored in SQLite and survive restarts.
-
-## Tests
-
-The standard-library test suite mocks all network access:
+### Find proxies suitable for a particular website
 
 ```bash
-PYTHONPATH=src python -m unittest discover -v
+./proxytools --url https://example.com
 ```
 
-## Project structure
+For each proxy, Proxy Tools first performs its normal HTTPS identity check and then requests the supplied URL through the same proxy. A proxy is printed only when the complete check succeeds.
 
-The application uses a `src` package layout. Command modules only orchestrate
-the independent domain and adapter layers:
+This is useful when a proxy works generally but the destination website blocks it, returns an error, or cannot be reached from that exit location.
+
+### Limit acceptable latency
+
+```bash
+./proxytools --max-latency 300
+```
+
+Only proxies with a median latency below 300 ms are printed. The default comes from `MAX_LATENCY` in `proxytools.conf`.
+
+### Inspect detailed scan results
+
+```bash
+./proxytools --debug
+```
+
+Debug output includes latency, protocol, address, connection string, country, coordinates, and a map link. It is intended for inspection rather than direct use as a proxy list.
+
+### Validate a website in a real browser
+
+```bash
+./proxytools list \
+  --url https://example.com \
+  --browser-check
+```
+
+After lightweight checks pass, Selenium opens Chrome through each candidate proxy and verifies that the page loads. Browser checks run one at a time because launching many Chrome instances is expensive.
+
+By default, a successful browser remains visible briefly for inspection. On a server without a graphical session, use:
+
+```bash
+./proxytools list \
+  --url https://example.com \
+  --browser-check \
+  --headless
+```
+
+`--browser-check` requires `--url`, and `--headless` requires `--browser-check`.
+
+### Search for stable proxies over time
+
+```bash
+./proxytools monitor
+```
+
+The monitor immediately restores previously saved candidates, rechecks them, downloads fresh candidates from ProxyScrape, and keeps both groups moving through independent work queues.
+
+The main table shows only proxies for which latency has actually been measured. Rows are grouped by status and sorted by latency inside each group:
+
+1. `STABLE`;
+2. `PROBATION`;
+3. `DEGRADED`.
+
+### Monitor access to one specific website
+
+```bash
+./proxytools monitor --url https://whatismyipaddress.com/
+```
+
+Every proxy must pass both the normal identity check and a lightweight request to this URL. HTTP 403 is accepted because anti-bot sites frequently reject `requests` while remaining usable in an interactive browser. Other HTTP errors and network failures fail the complete check.
+
+When a URL is configured, pressing `b` opens that same address through the selected proxy.
+
+### Monitor with diagnostic columns
+
+```bash
+./proxytools monitor --debug
+```
+
+This additionally shows city, measured exit IP, and the conditions currently preventing a proxy from becoming stable.
+
+## Monitor controls
+
+| Key | Action |
+|-----|--------|
+| Arrow keys | Select and scroll rows |
+| `s` | Choose visible statuses |
+| `p` | Choose visible protocols |
+| `c` | Search for and select a country |
+| `b` | Open the selected proxy in a private browser session |
+| `q` | Stop the monitor and quit |
+
+State, protocol, and country filters work together. By default, `STABLE` and `PROBATION` are visible and `DEGRADED` is hidden.
+
+Rows remain in place while an active checking pass is running and are reordered after the pass completes. This prevents the selected proxy from constantly jumping around the table.
+
+When `q` is pressed, the monitor displays a stopping message and waits for active requests to finish or reach their configured timeout.
+
+## Proxy statuses
+
+### `PROBATION`
+
+The proxy is still proving itself, recovering from failures, or has not yet met every configured stability condition. Typical blockers include insufficient live time, too few checks, an insufficient success rate, high latency, excessive jitter, or failure to reach the configured URL.
+
+### `STABLE`
+
+The proxy has remained available long enough and satisfies the required history, streak, success-rate, latency, and jitter thresholds.
+
+A small number of isolated failures is tolerated. A previously stable proxy can recover after one clean complete check instead of repeating the entire initial probation period.
+
+### `DEGRADED`
+
+The proxy continued to fail after its recovery grace period. Degraded proxies are hidden by default but can be enabled with the `s` status filter.
+
+### Restored marker `*`
+
+A status ending in `*` was restored from the local database and has not yet been verified during the current run. The asterisk is only a marker; it is not a separate status.
+
+## Understanding the measurements
+
+- **Alive** — continuous healthy period used for stability admission; tolerated isolated failures do not reset it immediately.
+- **Checks** — rolling checks retained versus the number required for admission.
+- **Streak** — consecutive complete successful checks.
+- **OK** — complete success rate over the rolling history.
+- **Median** — median of measured proxy latencies.
+- **P95** — 95th-percentile measured latency.
+- **Jitter** — deviation of measured latencies.
+- **Country** — location resolved locally from the measured HTTPS exit IP.
+
+Proxy Tools distinguishes two important facts internally:
+
+- **reachable** means the proxy answered and latency was measured;
+- **accepted** means the complete check passed, including latency and the optional target URL.
+
+This is why a proxy can have a measured median while still being in probation or degraded.
+
+## Opening a selected proxy in a browser
+
+Press `b` in the monitor to open the selected proxy in a disposable private session.
+
+- Chrome/Chromium uses incognito mode and a temporary user-data directory.
+- Firefox uses private mode and a generated temporary profile.
+- The regular browser profile, cookies, history, and proxy settings are not modified.
+- Only one browser session can be launched by one monitor at a time.
+- Temporary profile data is removed after the launched browser closes.
+
+`MONITOR_BROWSER` in `proxytools.conf` selects `auto`, `chrome`, or `firefox`. In `auto` mode, Chrome/Chromium is preferred and Firefox is used as a fallback.
+
+Private browsing isolates the temporary session from the main profile. It should not be treated as a complete anonymity guarantee.
+
+## Configuration
+
+Persistent defaults live in `proxytools.conf` beside the launcher:
 
 ```text
-proxytools                 root launcher and environment bootstrap
-proxytools.conf            commented host/runtime defaults
-proxydb/                  ignored proxy state, SQLite companions, and lock
-geodb/                    ignored GeoIP database and version marker
-pyproject.toml             package metadata and installed console script
-src/proxytools/
-  cli.py                   top-level command dispatcher
-  commands/                list and monitor orchestration
-  sources/                 ProxyScrape API adapter
-  checking/                HTTP and optional browser validation
-  monitoring.py            UI-independent engine and immutable snapshots
-  browser.py               disposable interactive browser launcher
-  browser_session.py       detached temporary-profile lifecycle helper
-  stability/               rolling history and stability policy
-  storage/                 versioned SQLite schema, restoration, and persistence
-  output/                  list formatting and split Textual dashboard widgets
-  process_lock.py          per-clone kernel process lock
-  paths.py                 clone-local runtime path resolution
-  models.py                shared domain records
-  config.py                strict config loading and CLI value validation
-tests/                     isolated unit tests with mocked network access
+KEY=value
 ```
 
-## Notes
+Lines beginning with `#` and blank lines are ignored. Inline comments are supported. The configuration is parsed as plain data and is never executed as a shell script.
 
-- Free proxies are short-lived and unreliable — expect a low success rate.
-- Tune `WORKERS` for faster listing (more open connections), or `TIMEOUT` on a slow connection.
-- `--browser-check` is slow by nature and deliberately uses one Chrome instance at a time.
-- On a headless server, pair `--browser-check` with `--headless`, or Chrome will fail to launch.
+The parser is intentionally strict. Unknown keys, duplicate keys, missing required keys, invalid values, and invalid ranges stop startup with a useful error.
+
+### General settings
+
+| Key | Purpose |
+|-----|---------|
+| `TIMEOUT` | Maximum seconds for one network request |
+| `WORKERS` | Concurrent network checks, from 1 to 100 |
+| `SAMPLES` | Requests used for one latency measurement, from 1 to 5 |
+| `MAX_LATENCY` | Maximum acceptable median latency in milliseconds |
+| `URL` | Optional website every proxy must reach; empty disables the check |
+
+### Monitor settings
+
+| Key | Purpose |
+|-----|---------|
+| `MONITOR_REFRESH_INTERVAL` | Delay between active-pool passes |
+| `MONITOR_HISTORY_SIZE` | Recent measurements retained per proxy |
+| `MONITOR_MIN_CHECKS` | Checks required for initial stable admission |
+| `MONITOR_MIN_SUCCESS_RATE` | Required complete success fraction from 0 to 1 |
+| `MONITOR_MIN_SUCCESS_STREAK` | Consecutive successes required for admission |
+| `MONITOR_MIN_ALIVE_TIME` | Continuous accepted uptime required for admission |
+| `MONITOR_MAX_JITTER` | Maximum permitted latency deviation in milliseconds |
+| `MONITOR_ALIVE_FAILURE_TOLERANCE` | Hard failures tolerated while retaining `STABLE` |
+| `MONITOR_DEGRADED_AFTER` | Failed seconds before probation becomes degraded |
+| `MONITOR_RETENTION_TIME` | Seconds to track proxies no longer advertised by ProxyScrape |
+| `MONITOR_BROWSER` | Browser used by `b`: `auto`, `chrome`, or `firefox` |
+
+The comments inside `proxytools.conf` describe valid ranges and defaults in more detail.
+
+CLI options override `URL` and `MAX_LATENCY` for one invocation without modifying the file:
+
+```bash
+./proxytools monitor \
+  --url https://example.com \
+  --max-latency 350
+```
+
+## Local data
+
+Generated state is stored beside the launcher but outside the project root's visible file list:
+
+```text
+proxydb/
+  proxytools.db
+  proxytools.db-wal
+  proxytools.db-shm
+  proxytools.lock
+
+geodb/
+  geoip.mmdb
+  version
+```
+
+`proxydb/` contains monitor history and the per-clone process lock. `geodb/` contains the automatically downloaded monthly DB-IP City Lite database. Both directories are ignored by Git.
+
+Existing files from older versions are moved from the project root into these directories automatically.
+
+Each clone has its own state. Two separate clones may run simultaneously, but two working Proxy Tools commands cannot run from the same clone at the same time.
+
+## Resetting local state
+
+```bash
+./proxytools --clear
+```
+
+This returns the directory to its freshly cloned runtime state by removing:
+
+- `.venv` and installed dependencies;
+- proxy history and locks in `proxydb/`;
+- the downloaded GeoIP database in `geodb/`;
+- Python bytecode and common test/build caches;
+- legacy generated files from older versions.
+
+Source files, Git metadata, `.env` files, and arbitrary redirected user output are preserved. The deleted runtime state cannot be recovered. Cleanup refuses to run while another command owns the clone lock.
+
+## Troubleshooting
+
+### The first run takes a while
+
+The first real command creates `.venv`, installs dependencies, and downloads the monthly GeoIP database. Later starts reuse them.
+
+### Few or no proxies are found
+
+Public proxies are short-lived and unreliable. Try a larger `TIMEOUT`, a higher `MAX_LATENCY`, or another run after ProxyScrape updates its lists. A restrictive `--url` can reduce the result set dramatically.
+
+### Browser validation fails
+
+Ensure Chrome or Chromium is installed. Use `--headless` when no graphical desktop is available. Selenium Manager may need internet access to obtain a compatible driver.
+
+### The `b` action cannot find a browser
+
+Install Chrome, Chromium, or Firefox, or set `MONITOR_BROWSER` to a browser that is present on the host.
+
+### Country differs from a website's result
+
+Proxy Tools resolves the measured HTTPS exit IP through a local monthly GeoIP database. Commercial websites may use newer or different location data, and some proxies route different destinations through different exits. Country data is therefore useful for filtering but cannot be guaranteed to match every website.
+
+### A proxy has latency but is not stable
+
+Latency only proves reachability. Stable admission also depends on elapsed live time, check count, success rate, streak, jitter, and the optional target URL.
+
+## Further technical information
+
+Architecture, data flow, status algorithms, SQLite persistence, bootstrap behavior, testing, and contribution guidance are documented in [DEVELOPERS.md](DEVELOPERS.md).
 
 ## License
 
