@@ -6,24 +6,18 @@ from textual.widgets import DataTable, SelectionList, Static
 
 from proxytools.monitoring import MonitorEngine, MonitorRow, MonitorSnapshot
 from proxytools.output.dashboard import ProxyMonitorApp
-from proxytools.output.dashboard_widgets import ProtocolSelectionList
+from proxytools.output.dashboard_widgets import ProtocolSelectionList, ProxyDetailsScreen
 from proxytools.stability import StabilityConfig, StabilityPolicy
 
 
 class DashboardTests(unittest.IsolatedAsyncioTestCase):
-    def test_diagnostics_columns_require_debug_mode(self):
-        normal = ProxyMonitorApp(None, autostart=False)
-        debug = ProxyMonitorApp(None, autostart=False, debug=True)
+    def test_monitor_has_one_compact_column_set(self):
+        app = ProxyMonitorApp(None, autostart=False)
 
-        normal_labels = {label for label, _key in normal.columns}
-        debug_labels = {label for label, _key in debug.columns}
-        self.assertEqual(normal_labels, {"State", "Country", "Median", "Alive", "Connection"})
-        diagnostics = {
-            "Checks", "Streak", "OK", "P95", "Jitter",
-            "City", "Exit IP", "Blocked by",
-        }
-        self.assertTrue(diagnostics.isdisjoint(normal_labels))
-        self.assertTrue(diagnostics <= debug_labels)
+        self.assertEqual(
+            {label for label, _key in app.columns},
+            {"State", "Country", "Median", "Alive", "Connection"},
+        )
 
     async def test_normal_status_hides_backend_lane_details(self):
         app = ProxyMonitorApp(Mock(), autostart=False)
@@ -41,7 +35,7 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("Active", status)
             self.assertNotIn("Discovery", status)
 
-    async def test_snapshot_populates_table_and_details(self):
+    async def test_snapshot_populates_table_and_opens_details(self):
         engine = MonitorEngine(
             policy=StabilityPolicy(StabilityConfig()),
             workers=1,
@@ -50,7 +44,7 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             refresh_interval=1,
             retention_time=60,
         )
-        app = ProxyMonitorApp(engine, autostart=False, debug=True)
+        app = ProxyMonitorApp(engine, autostart=False)
         row = MonitorRow(
             key=("http", "1.2.3.4:80"),
             state="PROBATION",
@@ -73,7 +67,12 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.assertEqual(app.query_one(DataTable).row_count, 1)
             self.assertIn("Checking 4/10", str(app.query_one("#status", Static).content))
-            self.assertIn("Blocked by: alive, checks", str(app.query_one("#details", Static).content))
+            await pilot.press("enter")
+            self.assertIsInstance(app.screen, ProxyDetailsScreen)
+            details = str(app.screen.query_one("#proxy-details", Static).content)
+            self.assertIn("Blocked by: alive, checks", details)
+            self.assertIn("P95: 120ms", details)
+            await pilot.press("escape")
             await pilot.press("y")
             self.assertEqual(app._clipboard, row.connection)
             second_row = replace(
@@ -117,7 +116,7 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.selected_states, {"STABLE", "PROBATION", "DEGRADED"})
             self.assertEqual(table.row_count, 2)
             self.assertEqual(table.get_row_at(0)[0].plain, "PROBATION")
-            self.assertEqual(table.get_row_at(0)[5], "200ms")
+            self.assertEqual(table.get_row_at(0)[2], "200ms")
             selected = table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value
             self.assertEqual(selected, "http|1.2.3.4:80")
             await pilot.press("c")

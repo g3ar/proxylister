@@ -76,7 +76,7 @@ Keep the CLI small. The intentional public options are:
 - `--help`;
 - `--version`;
 - `--clear`;
-- `--debug`;
+- `--debug` for `list` output;
 - `--url`;
 - `--max-latency`;
 - `--browser-check` where applicable;
@@ -90,6 +90,7 @@ second `requirements.txt`.
 Monitor controls currently include:
 
 - arrows — select and scroll;
+- `Enter` — show detailed analytics for the selected proxy;
 - `s` — choose states;
 - `p` — choose protocols;
 - `c` — choose country;
@@ -98,11 +99,11 @@ Monitor controls currently include:
 - `y` — copy the selected connection string with OSC 52;
 - `q` — display shutdown progress, finish bounded active work, and exit.
 
-Do not reintroduce removed controls such as `d` or `r`. Normal TUI mode stays
-compact: State, Country, Median, Alive, and Connection. City, Exit IP, Blocked
-by, detailed counters, and other diagnostics are `--debug` only. Candidates
-without measured latency remain in backend queues but must not appear in the
-table.
+Do not reintroduce removed controls such as `d` or `r`. The TUI stays compact:
+State, Country, Median, Alive, and Connection. City, Exit IP, blockers,
+detailed counters, and other proxy analytics are available through `Enter`;
+the monitor has no separate debug mode. Candidates without measured latency
+remain in backend queues but must not appear in the table.
 
 ## Architecture
 

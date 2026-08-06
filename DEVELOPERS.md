@@ -1,381 +1,456 @@
 # Proxy Tools developer guide
 
-This document describes implementation details for contributors, maintainers, and operators who need to understand the internals. User installation, commands, controls, configuration, and common workflows belong in [README.md](README.md).
+This guide is the shortest path from a fresh clone to a safe, tested change.
+User installation, commands, keyboard controls, configuration examples, and
+troubleshooting belong in [README.md](README.md). This file explains how the
+code fits together, where to add behavior, and which invariants must survive a
+change.
 
-## Design goals
+Proxy Tools targets Python 3.10 or newer, uses a `src/` package layout, and has
+one supported entrypoint:
 
-Proxy Tools follows a small set of project-level constraints:
+```bash
+./proxytools [list|monitor] [options]
+```
 
-- one root entrypoint: `./proxytools`;
-- one process per clone;
-- one dependency and package manifest: `pyproject.toml`;
-- clone-local runtime state that is never committed;
-- lightweight `requests` checks for continuous monitoring;
-- Selenium only when explicitly requested by the user;
-- UI rendering kept separate from the monitoring engine;
-- explicit distinction between network reachability and complete acceptance.
+## First 10 minutes
 
-The project targets Python 3.10 or newer and uses a `src/` package layout.
+From the repository root:
 
-## Repository structure
+```bash
+git status --short --branch
+./proxytools --help
+./proxytools list --help
+./proxytools monitor --help
+./.venv/bin/python -m unittest discover -v
+```
+
+The first real command creates `.venv` and installs the project. If `.venv`
+does not exist yet, run `./proxytools --version` or another normal command
+before invoking its Python directly.
+
+Before editing:
+
+1. preserve existing modified and untracked files;
+2. find the relevant command, implementation, and tests with `rg`;
+3. read the code path end to end rather than patching the first matching
+   function;
+4. add or update a regression test for behavior changes;
+5. keep the change within the existing architecture unless a new boundary is
+   clearly necessary.
+
+The project deliberately favors small, removable designs. Do not add another
+entrypoint, dependency manifest, generic result flag, background service, or
+configuration layer for a hypothetical future need.
+
+## Mental model
+
+Both commands share startup, discovery, and lightweight proxy checking:
 
 ```text
-proxytools                  POSIX shell launcher and environment bootstrap
-proxytools.conf             strict, commented runtime defaults
-pyproject.toml              build metadata, version source, dependencies, entrypoint
-README.md                   end-user documentation
-DEVELOPERS.md               implementation and contributor documentation
+./proxytools
+    │
+    ├─ launcher: create/refresh .venv
+    └─ cli.py: lock clone, prepare GeoIP, dispatch command
+         │
+         ├─ list.py
+         │    └─ fetch candidates → check proxies → filter/sort → stdout
+         │
+         └─ monitor.py
+              └─ MonitorEngine → snapshots → Textual dashboard
+                    │
+                    ├─ StabilityPolicy classifies history
+                    └─ StateRepository saves useful restart state
+```
+
+The most important boundary is between the monitoring engine and the TUI.
+`MonitorEngine` knows nothing about Textual. It publishes immutable snapshots;
+the dashboard renders them and sends user actions to existing services.
+
+## Where to make a change
+
+| Goal | Start here | Usually update |
+|------|------------|----------------|
+| Change root dispatch or shared startup | `src/proxytools/cli.py` | `tests/test_cli.py` |
+| Change `list` behavior or options | `src/proxytools/commands/list.py` | CLI and proxy-library tests |
+| Change monitor construction or options | `src/proxytools/commands/monitor.py` | CLI tests |
+| Change candidate discovery | `src/proxytools/sources/proxyscrape.py` | `tests/test_proxylib.py` |
+| Change HTTP proxy validation | `src/proxytools/checking/proxy.py` | proxy and monitoring tests |
+| Change Selenium validation | `src/proxytools/checking/browser.py` | browser tests |
+| Change stability rules | `src/proxytools/stability/` | `tests/test_cli_helpers.py` |
+| Change monitor scheduling or snapshots | `src/proxytools/monitoring.py` | `tests/test_monitoring.py` |
+| Change the TUI table or actions | `src/proxytools/output/dashboard.py` | `tests/test_dashboard.py` |
+| Add a TUI modal or reusable widget | `src/proxytools/output/dashboard_widgets.py` | `tests/test_dashboard.py` |
+| Change saved monitor state | `src/proxytools/storage/sqlite.py` | `tests/test_persistence.py` |
+| Change runtime paths or cleanup | `paths.py`, `cleanup.py` | path and cleanup tests |
+| Change configuration | `config.py`, `proxytools.conf` | config and CLI tests |
+| Change dependencies or version metadata | `pyproject.toml` | launcher smoke test |
+
+## Repository map
+
+```text
+proxytools                  POSIX launcher and environment bootstrap
+proxytools.conf             strict runtime defaults
+pyproject.toml              only project/dependency manifest
 src/proxytools/
-  __main__.py               python -m proxytools bridge
-  cli.py                    root command dispatch and shared startup lifecycle
+  cli.py                    root dispatch and shared startup lifecycle
   cleanup.py                --clear implementation
-  config.py                 config parser and CLI value validation
-  paths.py                  clone-local runtime layout and legacy migration
-  process_lock.py           advisory per-clone process lock
-  geoip.py                  monthly DB-IP download and local lookup reader
+  config.py                 config parsing and value validation
+  paths.py                  clone-local paths and legacy migration
+  process_lock.py           advisory per-clone lock
+  geoip.py                  DB-IP download and local lookup
   models.py                 shared result records
-  http.py                   bounded Requests session lifecycles
-  browser.py                disposable interactive browser launcher
-  browser_session.py        detached temporary-profile lifecycle helper
+  http.py                   bounded Requests session helpers
+  browser.py                interactive browser launcher
+  browser_session.py        detached temporary-profile helper
   commands/
-    list.py                 one-shot orchestration and stdout output
-    monitor.py              monitor construction and Textual startup
-  sources/
-    proxyscrape.py          candidate source adapter
+    list.py                 one-shot orchestration and output
+    monitor.py              monitor construction and TUI startup
+  sources/proxyscrape.py    candidate source adapter
   checking/
-    proxy.py                identity, latency, exit IP, and target URL checks
+    proxy.py                identity, latency, exit IP, and URL checks
     browser.py              optional Selenium validation
   stability/
-    history.py              rolling samples and state transitions
-    policy.py               configurable stable-admission rules
-  storage/
-    sqlite.py               versioned persistence and restoration
+    history.py              rolling samples and transitions
+    policy.py               stable-admission policy
+  storage/sqlite.py         versioned monitor persistence
   output/
-    console.py              Rich stderr progress output
-    results.py              list filtering, sorting, and debug formatting
-    dashboard.py            monitor state rendering and application lifecycle
-    dashboard_widgets.py    filter modals and reusable Textual widgets
-tests/                      isolated unittest suite with mocked network access
+    console.py              Rich stderr progress
+    results.py              list formatting, filtering, and sorting
+    dashboard.py            Textual rendering and app lifecycle
+    dashboard_widgets.py    filter and analytics modals
+tests/                      offline standard-library unittest suite
 ```
 
-Generated directories are absent from a fresh clone and ignored by Git:
+Generated state is per clone and ignored by Git:
 
 ```text
-.venv/                      local Python environment
-proxydb/                    SQLite database, WAL/SHM, and process lock
-geodb/                      local GeoIP database and month marker
+.venv/
+proxydb/                    SQLite database, WAL/SHM, and lock metadata
+geodb/                      GeoIP database and version marker
 ```
 
-## Launcher and bootstrap
+## Core data semantics
 
-The root `proxytools` shell script is the supported entrypoint. It resolves its own directory, so commands work regardless of the caller's current directory.
+Two facts that sound similar have deliberately different meanings:
 
-For a working command, the launcher:
+- `ProxyResult.reachable`: the HTTPS identity request succeeded and latency
+  was measured;
+- `CheckSample.accepted`: the complete configured health check passed.
 
-1. creates `.venv` when missing;
-2. compares `pyproject.toml` with an installation stamp;
-3. verifies that required imports are available;
-4. runs `pip install -e <project>` when installation or refresh is needed;
-5. exports `PYTHONPATH` and `PROXYTOOLS_HOME`;
-6. delegates to `python -m proxytools`.
+A proxy can be reachable but not accepted because its median latency is too
+high or the configured target URL failed. Latency statistics use reachable
+measurements; success rate, streak, and healthy time use accepted checks.
 
-`pyproject.toml` is the only dependency manifest. The project version is read dynamically from `proxytools.__version__`, avoiding a second manually synchronized version string.
+Do not add a generic `ok` property or database column. It previously meant
+both concepts in different places and caused incorrect state transitions,
+persistence, and UI output.
 
-Root help is handled before environment creation. `--clear` uses the system Python because it may remove `.venv` while running.
+Candidate identity is `(protocol, address)`, not address alone. The same
+endpoint may genuinely support HTTP, SOCKS4, and SOCKS5.
 
-## Command dispatch
+## The checking pipeline
 
-`proxytools.cli` exposes two commands:
-
-- `list`, which is also selected when no mode is supplied;
-- `monitor`.
-
-Before a real command executes, the dispatcher:
-
-1. acquires the clone lock;
-2. ensures the local GeoIP database is usable and current;
-3. configures the shared local GeoIP reader;
-4. invokes the selected command module.
-
-Help and version do not acquire the process lock. Configuration errors and lock conflicts are converted into concise CLI errors.
-
-## Configuration model
-
-`proxytools.conf` is a complete flat `KEY=value` file. It is parsed with `shlex` as data and is never sourced by a shell.
-
-`RuntimeConfig` contains the typed values used by command construction. The loader rejects:
-
-- unknown keys;
-- duplicate keys;
-- missing keys;
-- malformed assignments;
-- invalid types or ranges;
-- impossible cross-field combinations such as minimum checks exceeding history size.
-
-Technical tuning belongs in this file. The intentionally small CLI surface contains only options that are useful to change for one invocation.
-
-## Proxy checking pipeline
-
-### Candidate source
-
-`sources.proxyscrape` downloads HTTP, SOCKS4, and SOCKS5 lists. Deduplication uses `(protocol, address)` rather than address alone because one endpoint may support more than one proxy protocol.
-
-### Base identity check
-
-`checking.proxy.check_proxy` sends each configured sample through the proxy to:
+`sources.proxyscrape` supplies public candidates. For every configured sample,
+`checking.proxy.check_proxy` sends an HTTPS request through the candidate to:
 
 ```text
 https://api.ipify.org?format=json
 ```
 
-This single HTTPS request provides three signals:
+That request establishes reachability, measures the complete request duration,
+and returns the observed public exit IP. Latency is the median across samples.
+Country, city, and coordinates are resolved locally from that exit IP; source
+metadata is never authoritative for the browser-facing location.
 
-- the proxy can carry an HTTPS request;
-- the complete request duration can be measured;
-- the public exit IP observed outside the proxy is known.
+If `URL` or `--url` is configured, `check_url` makes one additional lightweight
+request through the proxy. Responses below 400 pass. HTTP 403 also passes
+because anti-bot sites may reject `requests` while remaining usable in a real
+browser. Other HTTP and network failures preserve reachability and latency but
+make the complete sample unaccepted with `failure_reason="url"`.
 
-Latency is the median complete duration across configured samples. Country, city, and coordinates are resolved locally from the exit IP; the identity service is not trusted for geolocation.
+Continuous URL checking must stay in Requests. Selenium is used only by
+explicit `list --browser-check`; it runs after lightweight checks and is
+serialized to one Chrome instance.
 
-Each logical proxy check uses a short-lived `proxy_session`. This is required for long-running monitors: Requests caches a connection manager for every distinct proxy URL, and a shared session fed an unbounded sequence of public proxies will otherwise retain sockets until the process reaches its file-descriptor limit. Every response and proxy session must be closed on success, validation failure, and exceptions. Direct calls to bounded upstream services may use the thread-local session.
+### Requests lifecycle invariant
 
-### Reachability versus acceptance
+Each logical proxy check must create and close a short-lived `proxy_session`,
+including every response, on success and on every error path. Requests caches
+a connection manager for each proxy URL; feeding unlimited public proxies to a
+shared session eventually exhausts file descriptors. Thread-local sessions are
+appropriate only for bounded upstream services such as the candidate source.
 
-These concepts must remain separate throughout the codebase:
+## `list` flow
 
-- `ProxyResult.reachable` means the base identity request completed and latency was measured;
-- `CheckSample.accepted` means the complete health check passed all current criteria.
+`commands/list.py` owns one-shot orchestration:
 
-A reachable result can remain unaccepted because:
+1. fetch and deduplicate candidates;
+2. run lightweight checks concurrently;
+3. optionally run explicit Selenium validation;
+4. filter and sort accepted results;
+5. write progress to stderr and results to stdout.
 
-- median latency exceeds the configured maximum;
-- the configured target URL failed;
-- another complete-check policy rejected it.
+Normal stdout is intentionally machine-friendly: one connection string per
+line. Keep diagnostics behind `list --debug`, and never mix progress text into
+stdout because users pipe and redirect it.
 
-Latency statistics use all reachable measurements. Success rates and streaks use accepted checks. Do not reintroduce a generic `ok` field: its former double meaning caused UI, persistence, and state-transition inconsistencies.
+## `monitor` flow
 
-### Target URL check
+`MonitorEngine` owns scheduling and state; `ProxyMonitorApp` owns presentation.
+The engine receives source, checker, policy, and repository adapters, making it
+testable without Textual or live network access.
 
-When `URL` or `--url` is set, `check_url` performs an additional streamed `requests` call through the same proxy. It does not launch Selenium.
+Monitoring uses independent work lanes:
 
-HTTP responses below 400 pass. Monitor and list currently accept 403 because anti-bot pages frequently reject a non-browser client while remaining usable through the interactive browser. Other failures set `failure_reason="url"` while preserving base reachability and measured latency.
-
-### Selenium validation
-
-`list --browser-check` runs only after lightweight identity and target checks pass. It is deliberately serialized to one Chrome instance.
-
-The validator rejects browser network-error pages and main-document HTTP error responses. Visible successful sessions remain open briefly; headless sessions close immediately.
-
-## Monitoring engine
-
-`MonitorEngine` has no Textual dependency. It receives source, checker, policy, and repository adapters and publishes immutable `MonitorSnapshot` records.
-
-### Two work lanes
-
-Long-running monitoring uses independent executors:
-
-- the active lane repeatedly checks known `STABLE` and `PROBATION` proxies;
-- the discovery lane processes fresh ProxyScrape candidates;
+- the active lane rechecks known `STABLE` and `PROBATION` proxies;
+- the discovery lane checks newly fetched candidates;
 - a one-worker source executor refreshes candidate lists.
 
-Roughly 20% of configured workers are reserved for active proxies. Each lane receives at least one worker, preventing discovery from blocking probation progress.
+About 20% of configured workers are reserved for the active lane, and each lane
+gets at least one worker. This prevents a large discovery batch from stopping
+known candidates from progressing. An overlap guard prevents the same proxy
+from running in both lanes at once.
 
-An overlap guard prevents the same `(protocol, address)` from running in both lanes simultaneously. Newly successful discovery candidates become eligible for the active lane immediately.
+The engine publishes immutable `MonitorSnapshot` values:
 
-### Snapshots and UI responsiveness
+- full snapshots establish or reconcile the visible set at phase boundaries;
+- incremental snapshots contain only changed rows while checks finish;
+- waiting snapshots update countdown and status without rewriting the table.
 
-The engine publishes full snapshots at phase boundaries and incremental snapshots while checks complete. Incremental updates contain only changed rows. Waiting snapshots update countdown/status information without forcing the dashboard to rewrite thousands of cells.
+Candidates without measured latency stay in backend queues but are omitted
+from visible snapshots.
 
-The dashboard preserves selection and scroll position, updates only changed cells, rebuilds large filtered views in small event-loop chunks, and sorts only at controlled pass boundaries.
+### TUI rules
 
-Normal mode deliberately keeps only State, Country, Median, Alive, and Connection in the table. Diagnostic columns and separate active/discovery counters belong to `--debug`; detailed quality data remains available in the selected-row panel. The `y` action uses Textual's OSC 52 clipboard support and must not introduce platform clipboard dependencies.
+Never perform network, SQLite, Selenium, or a large synchronous table rebuild
+on the Textual event loop.
 
-Candidates without any measured latency remain in engine queues but are omitted from visible snapshots.
+The dashboard updates changed cells, rebuilds large filtered views in chunks,
+preserves selection and scroll position, and sorts only at controlled pass
+boundaries. Keep those properties when changing rendering.
+
+The main table intentionally has one compact layout: State, Country, Median,
+Alive, and Connection. Detailed proxy analytics belong in the `Enter` modal,
+not additional permanent columns or a separate debug mode. The `y` action uses
+Textual's OSC 52 support; do not add platform clipboard dependencies.
 
 ## Stability model
 
-`ProxyHistory` owns a bounded deque of `CheckSample` values. Each sample records:
+`ProxyHistory` stores a bounded deque of `CheckSample` values. Each sample has
+a monotonic timestamp, reachability, acceptance, optional latency, and failure
+reason. `StabilityPolicy.blockers()` evaluates check count, accepted success
+rate, success streak, continuous healthy time, median latency, and jitter.
 
-- monotonic check time;
-- reachability;
-- complete acceptance;
-- measured latency when available;
-- failure reason.
+The only states are:
 
-The policy evaluates:
+```text
+STABLE → PROBATION → DEGRADED
+```
 
-- minimum check count;
-- accepted success rate;
-- accepted success streak;
-- continuous accepted uptime;
-- median latency;
-- latency jitter.
+New proxies begin in `PROBATION` and enter `STABLE` only when no admission
+blockers remain.
 
-### Initial admission
+A stable proxy tolerates the configured number of consecutive hard failures.
+The next failure resets continuous healthy time, moves it to `PROBATION`, and
+starts the degradation grace period. Continuous hard failure for
+`MONITOR_DEGRADED_AFTER` moves it to `DEGRADED`. One accepted recovery check
+may restore a proxy that was previously stable.
 
-A new proxy starts in `PROBATION`. It becomes `STABLE` only when `StabilityPolicy.blockers()` returns no reasons.
+Latency follows a separate rule:
 
-### Failure tolerance
+- `STABLE` always requires rolling median `< MAX_LATENCY`;
+- one isolated slow sample should not cause churn;
+- sustained slow median moves `STABLE` to `PROBATION`;
+- a reachable slow proxy never becomes `DEGRADED` from latency alone;
+- it returns to `STABLE` when the rolling median is acceptable again.
 
-A stable proxy retains its state through the configured number of hard failures. The next hard failure resets continuous live time, moves it to `PROBATION`, and begins the degradation grace period.
+Target URL failure is a hard complete-check failure because the user explicitly
+required that destination. It still preserves base reachability and latency.
 
-Continued hard failure for `MONITOR_DEGRADED_AFTER` produces `DEGRADED`. A previously stable proxy returns to `STABLE` after one complete accepted recovery check.
+When changing stability behavior, test the full transition sequence, not just
+the final state. Include timestamps and consecutive samples that demonstrate
+the intended tolerance, grace period, and recovery.
 
-A reachable but slow result is a quality miss, not evidence that the proxy is dead. One isolated slow sample does not demote an already stable proxy because the limit is evaluated against the rolling median. A sustained rolling median at or above `MAX_LATENCY` moves `STABLE` to `PROBATION`, never directly to `DEGRADED`; the proxy returns to `STABLE` when the rolling median is acceptable again. Persisted `STABLE` state is normalized by the same latency invariant during restoration.
+## Persistence and restoration
 
-### URL failures
-
-A target URL failure is a hard complete-check failure because the user explicitly required access to that destination. Base reachability and latency remain available for diagnostics and statistics.
-
-## SQLite persistence
-
-`StateRepository` uses one SQLite database under `proxydb/`. WAL mode permits safe batched writes and inspection while the monitor is active. The visible companion files are normal SQLite state:
-
-- `proxytools.db`;
-- `proxytools.db-wal`;
-- `proxytools.db-shm`.
-
-Only useful restart state is retained. `DEGRADED` and never-working candidates are removed rather than accumulated as a graveyard.
+`StateRepository` stores useful `STABLE` and `PROBATION` restart state in
+`proxydb/proxytools.db`. WAL mode produces normal `-wal` and `-shm` companion
+files. `DEGRADED` and never-working candidates are removed rather than retained
+as an unlimited history of dead proxies.
 
 The schema contains:
 
-- `proxies` for current state and lifetime aggregates;
-- `checks` for recent rolling-history reconstruction;
-- `state_transitions` for status changes.
+- `proxies`: current state and lifetime aggregates;
+- `checks`: recent rolling history;
+- `state_transitions`: state changes.
 
-`checks.accepted` and `checks.reachable` intentionally remain separate. Failure reasons are persisted so target failures retain their meaning after restart.
+`checks.accepted` and `checks.reachable` must remain separate. Failure reasons
+are persisted so URL failures retain their meaning after restart.
 
-### Schema migrations
+On restoration, wall-clock timestamps are translated into the current
+monotonic clock domain. Application downtime does not count as live proxy
+uptime. A restored row carries `*` until its first fresh check, and persisted
+`STABLE` state is normalized against the current latency limit. Checks older
+than 24 hours are pruned while lifetime aggregates remain.
 
-SQLite `PRAGMA user_version` identifies the schema version. Migrations in `_migrate_schema()` must be:
+### Schema changes
 
-- ordered;
-- transactional where SQLite permits;
-- backward compatible with databases created by released versions;
-- covered by a migration test.
+`PRAGMA user_version` selects ordered migrations in `_migrate_schema()`. A
+migration must preserve databases created by earlier releases, be transactional
+where SQLite permits, and have a regression test. Never delete or recreate a
+user's database merely to make a schema change easier.
 
-Schema version 2 renamed ambiguous `ok` fields to `accepted`, retained `reachable`, and added persisted failure reasons.
+## Shared startup and runtime services
 
-Do not silently discard a user's database to simplify a migration.
+### Launcher and command dispatch
 
-### Restoration
+The root `proxytools` script resolves the checkout directory, creates or
+refreshes `.venv`, installs the editable project from `pyproject.toml`, exports
+`PYTHONPATH` and `PROXYTOOLS_HOME`, and delegates to `python -m proxytools`.
+`pyproject.toml` is the only dependency and project manifest; the package
+version is read dynamically from `proxytools.__version__`.
 
-On startup, recent checks rebuild in-memory rolling history using wall-clock timestamps translated into the current monotonic clock domain.
+Root help runs before environment creation. `--clear` uses the system Python
+because it may delete `.venv` while running.
 
-Long application downtime is not counted as live proxy uptime. Restored status remains visible with `*` until the first fresh check. Failure grace metadata and previous-stable history survive restart.
+For a real command, `cli.py` acquires the clone lock, prepares the local GeoIP
+database, configures the reader, and dispatches `list` or `monitor`. Help and
+version do not acquire the lock.
 
-Detailed checks older than 24 hours are pruned while retained aggregates remain.
+### Configuration
 
-## Runtime paths and compatibility migration
+`proxytools.conf` is a complete flat `KEY=value` document parsed as data with
+`shlex`; it is never sourced as shell code. `RuntimeConfig` contains typed
+values. The parser rejects unknown or duplicate keys, missing values, malformed
+assignments, invalid ranges, and impossible cross-field combinations.
 
-`paths.py` resolves all runtime state relative to `PROXYTOOLS_HOME`, not the caller's working directory.
+Technical defaults belong in the config file. Add a CLI option only when users
+reasonably need to change intent for one invocation. When changing the public
+surface, update command help, README examples, and parser-surface tests.
 
-Current layout:
+### Runtime paths and locking
 
-```text
-proxydb/proxytools.db
-proxydb/proxytools.db-wal
-proxydb/proxytools.db-shm
-proxydb/proxytools.lock
-geodb/geoip.mmdb
-geodb/version
-```
+`paths.py` resolves state from `PROXYTOOLS_HOME`, never from the caller's current
+directory. Legacy root-level database, lock, GeoIP, and version files are moved
+atomically into `proxydb/` or `geodb/` without overwriting an existing target.
 
-Legacy root-level database, WAL, SHM, lock, GeoIP, and version files are atomically moved to the new layout when their paths are first accessed. A destination is never overwritten when both old and new files exist.
+`ProcessLock` uses Linux `flock`, not lock-file existence. Kernel ownership is
+released after exit or a crash; retained JSON is only diagnostic metadata. The
+lock is per clone, so separate clones may run simultaneously.
 
-## Process locking
+### GeoIP
 
-`ProcessLock` uses Linux `flock`, not file existence. Kernel lock ownership disappears automatically after normal exit or a crash, while the retained JSON file provides PID, command, start time, and database path for diagnostics.
+`geoip.py` selects the current monthly DB-IP City Lite archive, downloads and
+decompresses it through temporary files, validates it with `maxminddb`, then
+atomically replaces the active database and version marker. A failed update
+keeps a valid old database. Without a usable database, checks continue with
+location `Unknown`.
 
-The lock is per clone because it resides under that clone's `proxydb/`. Separate clones can run independently.
+The shared reader supports concurrent lookups. Keep DB-IP attribution visible
+in user documentation.
 
-## GeoIP lifecycle
+### Disposable browser sessions
 
-`geoip.py` derives the expected DB-IP City Lite filename from the current UTC month. On a missing or outdated local database it:
+The monitor's `b` action launches a detached helper so profile cleanup can
+outlive the TUI. Chrome/Chromium receives incognito mode and a temporary user
+data directory. Firefox receives private mode and a generated profile with
+protocol-specific settings. SOCKS4 and SOCKS5 versions are explicit. The
+helper never reads or changes the user's normal browser profile.
 
-1. downloads the gzip archive over HTTPS;
-2. streams it into a temporary file under `geodb/`;
-3. decompresses to another temporary file;
-4. opens the result with `maxminddb` to validate it;
-5. atomically replaces the active database;
-6. writes the month marker.
+### Cleanup
 
-If an update fails, a valid existing database remains active. With no usable database, proxy checks continue and locations become `Unknown`.
+`./proxytools --clear` removes only known generated artifacts and refuses to
+run while another command owns the clone lock. Source, Git metadata, `.env`,
+and arbitrary user exports are preserved.
 
-The shared reader is safe for concurrent lookup calls. Attribution must remain visible in user documentation: IP Geolocation by DB-IP, https://db-ip.com.
+When adding generated state, update all four places together:
 
-## Disposable browser sessions
+1. `.gitignore`;
+2. `cleanup.py`;
+3. cleanup tests;
+4. the local-data section in `README.md`.
 
-The monitor's `b` action launches a detached helper process so cleanup can outlive the Textual application.
+## Common extension recipes
 
-Chrome receives incognito mode, a temporary user-data directory, and a command-line proxy. Firefox receives private mode and a generated profile containing protocol-specific preferences. SOCKS4 and SOCKS5 versions are configured explicitly.
+### Change a proxy check
 
-The helper removes its temporary profile after the browser exits. It never reads or modifies the user's normal browser profile.
+1. Decide whether the result affects reachability, acceptance, or both.
+2. Preserve a measured latency whenever base identity succeeded.
+3. Set a specific failure reason for complete-check failures.
+4. Close responses and the short-lived proxy session on every path.
+5. Add offline tests for success, rejection, and exception cleanup.
 
-## Cleanup behavior
+### Change stability policy
 
-`./proxytools --clear` is intentionally destructive only toward known runtime artifacts. It removes environments, generated databases, runtime directories, bytecode, and common build/test caches while preserving source, Git metadata, `.env` files, and arbitrary exports.
+1. Add the rule to `StabilityPolicy`, not the TUI or command module.
+2. Decide how it affects new admission, stable tolerance, degradation, and
+   recovery.
+3. Test sequences of samples and time, including restart normalization if the
+   rule depends on persisted history.
+4. Expose a configuration value only if operators genuinely need to tune it.
 
-Cleanup acquires the same per-clone process lock and refuses to proceed while another working command is running. When adding a new generated artifact, update:
+### Change the TUI
 
-- `.gitignore`;
-- `cleanup.py`;
-- cleanup tests;
-- the user-facing local-data section in `README.md`.
+1. Keep engine data and scheduling independent from Textual.
+2. Put reusable modals and interaction widgets in `dashboard_widgets.py`.
+3. Keep expensive work off the event loop.
+4. Preserve row identity, selection, scroll position, and controlled sorting.
+5. Test the action through Textual's async test pilot.
+6. Update the monitor section in `README.md` when user interaction changes.
 
-## Testing
+### Change persisted state
 
-Run the standard-library test suite from the repository root:
+1. Add an ordered schema migration rather than replacing the database.
+2. Preserve the distinction between accepted and reachable.
+3. Test migration from the previous schema and current round-trip behavior.
+4. Confirm restored histories preserve grace periods and do not count downtime
+   as healthy time.
+
+### Add a dependency
+
+Add it only to `pyproject.toml`. Do not create `requirements.txt`. Run the real
+launcher once so its refresh/install path is exercised in addition to tests.
+
+## Testing and validation
+
+Tests use standard-library `unittest` and must remain offline and deterministic.
+Mock ProxyScrape, DB-IP, identity services, target sites, browsers, clocks, and
+filesystem homes as appropriate.
+
+For a normal Python change, run from the repository root:
 
 ```bash
 ./.venv/bin/python -m unittest discover -v
-```
-
-Network, browser, filesystem-home, and time-dependent behavior should be mocked. Tests must not depend on live ProxyScrape, DB-IP, identity services, or locally installed browsers.
-
-Useful verification commands:
-
-```bash
 find src/proxytools -name '*.py' -print0 \
   | xargs -0 ./.venv/bin/python -m py_compile
 sh -n proxytools
 git diff --check
+git status --short --branch
 ```
 
-The most important regression areas are:
+High-risk regression areas are:
 
-- state transitions and failure tolerance;
-- reachability versus acceptance;
-- SQLite save/restore and schema migration;
-- incremental dashboard rendering and selection preservation;
-- process locking and cleanup safety;
-- runtime-path migration;
-- browser profile isolation.
+- reachability versus complete acceptance;
+- stability tolerance, grace, latency, and recovery;
+- SQLite migration and restoration;
+- Requests resource cleanup;
+- active/discovery lane independence;
+- incremental TUI rendering and selection preservation;
+- clone locking, cleanup, and legacy path migration;
+- disposable browser profile isolation.
 
-## Dependency changes
+## Handoff checklist
 
-Runtime dependencies belong only in `pyproject.toml`. Do not add a manually maintained `requirements.txt`; it creates a second dependency source that can drift.
+Before handing a change back:
 
-After changing dependencies, run `./proxytools` once to exercise the real launcher refresh path as well as the test suite.
+1. inspect the exact diff and preserve unrelated worktree changes;
+2. confirm behavior at the command or TUI boundary, not only in a unit helper;
+3. run the full validation block above;
+4. update `README.md` for user-visible behavior and this guide for architectural
+   or contributor-workflow changes;
+5. report behavior changed, tests actually run, remaining risks, and whether a
+   commit or push was performed.
 
-## Adding a CLI option
-
-The CLI intentionally follows KISS. Before adding a flag, decide whether the value:
-
-- changes user intent for one invocation — a CLI option may be appropriate;
-- is a technical tuning default — it belongs in `proxytools.conf`;
-- is internal implementation policy — it may not need to be user-configurable.
-
-When a flag is added or changed, update command help, `README.md`, parser-surface tests, and configuration documentation together.
-
-## Contribution checklist
-
-Before handing off a change:
-
-1. keep command modules orchestration-focused;
-2. preserve the one-entrypoint workflow;
-3. keep stdout machine-friendly in normal `list` mode;
-4. avoid blocking the Textual event loop;
-5. preserve existing clone-local state through migrations;
-6. update cleanup for new generated files;
-7. update user and developer documentation at the correct level;
-8. run tests, Python compilation, shell syntax validation, and `git diff --check`.
+Do not commit or push unless the user explicitly authorizes it. Do not rebase,
+amend, force-push, or discard an existing worktree change as routine cleanup.

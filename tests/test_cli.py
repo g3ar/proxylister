@@ -39,8 +39,6 @@ class TopLevelCliTests(unittest.TestCase):
         self.assertEqual(args.max_latency, 500)
         self.assertEqual(settings.max_jitter, 500)
         self.assertEqual(settings.alive_failure_tolerance, 2)
-        self.assertFalse(args.debug)
-        self.assertTrue(monitor.build_parser().parse_args(["--debug"]).debug)
 
     def test_list_and_monitor_share_url_option(self):
         url = "https://example.com"
@@ -73,7 +71,7 @@ class TopLevelCliTests(unittest.TestCase):
             "--browser-check", "--headless",
         })
         self.assertEqual(monitor_options, {
-            "-h", "--help", "--debug", "--url", "--max-latency",
+            "-h", "--help", "--url", "--max-latency",
         })
 
 

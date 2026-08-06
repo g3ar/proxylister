@@ -12,6 +12,7 @@ Keyboard controls::
     q  quit                 s  choose visible states
     p  choose protocols     c  choose a country
     b  open selected proxy  y  copy connection string
+    Enter  show selected proxy analytics
 
 Examples::
 
@@ -36,10 +37,6 @@ from proxytools.storage import StateRepository
 def build_parser(prog="proxytools monitor", settings=None):
     settings = settings or load_config()
     parser = argparse.ArgumentParser(prog=prog, description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument(
-        "--debug", action="store_true",
-        help="Show City, Exit IP, and Blocked by diagnostics",
-    )
     parser.add_argument(
         "--url", type=web_url, default=settings.url,
         help="URL that every proxy must reach; also opened by 'b'",
@@ -90,7 +87,6 @@ def main(argv=None):
     try:
         ProxyMonitorApp(
             engine_from_args(args, repository, settings),
-            debug=args.debug,
             browser=settings.browser,
             browser_url=args.url or "about:blank",
         ).run()

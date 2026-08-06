@@ -9,13 +9,14 @@ from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import DataTable, Footer, Header, Static
+from textual.widgets import DataTable, Footer, Static
 
 from proxytools.monitoring import MonitorEngine, MonitorRow, MonitorSnapshot
 from proxytools.browser import BrowserUnavailable, launch_browser_session
 from proxytools.output.dashboard_widgets import (
     CountryFilterScreen,
     MonitorDataTable,
+    ProxyDetailsScreen,
     ProtocolFilterScreen,
     ProtocolSelectionList,
     StateFilterScreen,
@@ -27,8 +28,6 @@ from proxytools.output.dashboard_widgets import (
 class ProxyMonitorApp(App):
     """Full-screen, keyboard-driven proxy monitor."""
 
-    TITLE = "Proxy Tools"
-    SUB_TITLE = "Stable proxy monitor"
     CSS = """
     Screen {
         layout: vertical;
@@ -42,12 +41,6 @@ class ProxyMonitorApp(App):
     #table {
         height: 1fr;
     }
-    #details {
-        height: 8;
-        padding: 1 2;
-        border-top: solid $primary;
-        background: $surface;
-    }
     """
     BINDINGS = [
         Binding("q", "quit", "Quit"),
@@ -56,6 +49,7 @@ class ProxyMonitorApp(App):
         Binding("c", "country_filter", "Country"),
         Binding("b", "browser", "Browser"),
         Binding("y", "copy_connection", "Copy"),
+        Binding("enter", "details", "Details"),
     ]
     COLUMNS = (
         ("State", "state"),
@@ -64,25 +58,9 @@ class ProxyMonitorApp(App):
         ("Alive", "alive"),
         ("Connection", "connection"),
     )
-    DEBUG_COLUMNS = (
-        ("State", "state"),
-        ("Alive", "alive"),
-        ("Checks", "checks"),
-        ("Streak", "streak"),
-        ("OK", "success"),
-        ("Median", "median"),
-        ("P95", "p95"),
-        ("Jitter", "jitter"),
-        ("Country", "country"),
-        ("City", "city"),
-        ("Exit IP", "exit_ip"),
-        ("Blocked by", "blocked"),
-        ("Connection", "connection"),
-    )
-
     def __init__(
         self, engine: MonitorEngine, *, stable_only=False, autostart=True,
-        browser="auto", browser_url="about:blank", debug=False,
+        browser="auto", browser_url="about:blank",
     ):
         super().__init__()
         self.engine = engine
@@ -98,8 +76,7 @@ class ProxyMonitorApp(App):
         self.completed_cycle = 0
         self.browser = browser
         self.browser_url = browser_url
-        self.debug_ui = debug
-        self.columns = self.DEBUG_COLUMNS if debug else self.COLUMNS
+        self.columns = self.COLUMNS
         self.browser_process = None
         self.stopping = False
         self.filter_rebuilding = False
@@ -107,16 +84,13 @@ class ProxyMonitorApp(App):
         self.filter_pending_snapshot = None
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
         yield Static("Starting monitor…", id="status")
         yield MonitorDataTable(id="table", cursor_type="row", zebra_stripes=True)
-        yield Static("Select a proxy to see stability details.", id="details")
         yield Footer()
 
     def on_mount(self):
         table = self.query_one("#table", DataTable)
         table.add_columns(*self.columns)
-        self.query_one("#details", Static).styles.height = 8 if self.debug_ui else 5
         table.focus()
         if self.autostart:
             self.monitor_worker()
@@ -208,12 +182,6 @@ class ProxyMonitorApp(App):
                     immediate=True,
                 )
 
-        if table.row_count:
-            selected = str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
-            changed = self.rows_by_key.get(selected)
-            if changed is not None and changed.key in {row.key for row in snapshot.changed_rows}:
-                self._render_details(changed)
-
     def render_snapshot(self, snapshot: MonitorSnapshot):
         table = self.query_one("#table", DataTable)
         selected_key = None
@@ -253,21 +221,11 @@ class ProxyMonitorApp(App):
             if selected_key in self.rows_by_key:
                 table.move_cursor(row=table.get_row_index(selected_key), animate=False)
         self._render_status(snapshot, len(rows))
-        if rows:
-            current_key = str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
-            self._render_details(self.rows_by_key.get(current_key, rows[0]))
-        else:
-            self.query_one("#details", Static).update("No proxies match the current filter.")
 
     def _render_status(self, snapshot: MonitorSnapshot, visible: int):
         running = (
-            f"Active {snapshot.active_checked}/{snapshot.active_total} │ "
-            f"Discovery {snapshot.discovery_checked}/{snapshot.discovery_total}"
-            if self.debug_ui
-            else (
-                f"Checking {snapshot.active_checked + snapshot.discovery_checked}/"
-                f"{snapshot.active_total + snapshot.discovery_total}"
-            )
+            f"Checking {snapshot.active_checked + snapshot.discovery_checked}/"
+            f"{snapshot.active_total + snapshot.discovery_total}"
         )
         phase = {
             "running": running,
@@ -290,40 +248,42 @@ class ProxyMonitorApp(App):
         status = self.query_one("#status", Static)
         status.update(text)
 
-    def _render_details(self, row: MonitorRow):
+    def _details_text(self, row: MonitorRow):
         blocked = ", ".join(row.blockers) or "none"
         first_seen = self._timestamp(row.first_seen_at)
         last_failure = self._timestamp(row.last_failure_at)
         restored = "  [yellow]Restored from database; awaiting verification[/]" if row.restored else ""
-        if self.debug_ui:
-            body = (
-                f"Country: {row.country}    City: {row.city}    Exit IP: {row.exit_ip or '-'}\n"
-                f"Alive: {format_duration(row.alive_seconds)}    "
-                f"Checks: {row.checks}/{row.required_checks}    Streak: {row.streak}    "
-                f"Success: {row.success_rate:.1%}\n"
-                f"Median: {self._milliseconds(row.median_latency)}    "
-                f"P95: {self._milliseconds(row.p95_latency)}    Jitter: {row.jitter}ms    "
-                f"Blocked by: {blocked}\n"
-                f"First seen: {first_seen}    Observed uptime: "
-                f"{format_duration(row.total_observed_uptime)}    Last failure: {last_failure}"
-            )
-        else:
-            body = (
-                f"{row.country}    Median: {self._milliseconds(row.median_latency)}    "
-                f"Alive: {format_duration(row.alive_seconds)}\n"
-                f"Checks: {row.checks}/{row.required_checks}    Success: "
-                f"{row.success_rate:.1%}    Blocked by: {blocked}"
-            )
-        detail = Text.from_markup(
+        body = (
+            "[bold]Location[/bold]\n"
+            f"Country: {row.country}    City: {row.city}    Exit IP: {row.exit_ip or '-'}\n\n"
+            "[bold]Stability[/bold]\n"
+            f"Alive: {format_duration(row.alive_seconds)}    "
+            f"Observed uptime: {format_duration(row.total_observed_uptime)}\n"
+            f"Checks: {row.checks}/{row.required_checks}    Streak: {row.streak}    "
+            f"Success: {row.success_rate:.1%}\n"
+            f"Blocked by: {blocked}\n\n"
+            "[bold]Latency[/bold]\n"
+            f"Median: {self._milliseconds(row.median_latency)}    "
+            f"P95: {self._milliseconds(row.p95_latency)}    Jitter: {row.jitter}ms\n\n"
+            "[bold]History[/bold]\n"
+            f"First seen: {first_seen}\nLast failure: {last_failure}"
+        )
+        return Text.from_markup(
             f"[bold]{row.connection}[/bold]  [{self._state_color(row.state)}]{row.state}{'*' if row.restored else ''}[/]{restored}\n"
             f"{body}"
         )
-        self.query_one("#details", Static).update(detail)
 
-    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted):
-        row = self.rows_by_key.get(str(event.row_key.value))
-        if row is not None:
-            self._render_details(row)
+    def action_details(self):
+        table = self.query_one("#table", DataTable)
+        if not table.row_count:
+            self.notify("No proxy selected", severity="warning")
+            return
+        key = str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
+        row = self.rows_by_key.get(key)
+        if row is None:
+            self.notify("No proxy selected", severity="warning")
+            return
+        self.push_screen(ProxyDetailsScreen(self._details_text(row)))
 
     def action_states(self):
         self.push_screen(StateFilterScreen(self.selected_states), self.apply_state_filter)
@@ -409,11 +369,6 @@ class ProxyMonitorApp(App):
         snapshot = self.filter_pending_snapshot or self.latest_snapshot
         self.filter_pending_snapshot = None
         self._render_status(snapshot, len(self.rows_by_key))
-        if table.row_count:
-            key = str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
-            self._render_details(self.rows_by_key[key])
-        else:
-            self.query_one("#details", Static).update("No proxies match the current filter.")
 
     def action_browser(self):
         if self.browser_process is not None and self.browser_process.poll() is None:
@@ -517,27 +472,11 @@ class ProxyMonitorApp(App):
 
     def _row_cells(self, row: MonitorRow):
         state = self._state_text(f"{row.state}{'*' if row.restored else ''}")
-        if not self.debug_ui:
-            return (
-                state,
-                row.country,
-                self._milliseconds(row.median_latency),
-                format_duration(row.alive_seconds),
-                row.connection,
-            )
         return (
             state,
-            format_duration(row.alive_seconds),
-            f"{row.checks}/{row.required_checks}",
-            str(row.streak),
-            f"{row.success_rate:.0%}",
-            self._milliseconds(row.median_latency),
-            self._milliseconds(row.p95_latency),
-            f"{row.jitter}ms",
             row.country,
-            row.city,
-            row.exit_ip or "-",
-            ",".join(row.blockers) or "-",
+            self._milliseconds(row.median_latency),
+            format_duration(row.alive_seconds),
             row.connection,
         )
 

@@ -10,7 +10,7 @@ focused on translating monitor snapshots into visible rows.
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Input, Label, OptionList, SelectionList
+from textual.widgets import DataTable, Input, Label, OptionList, SelectionList, Static
 from textual.widgets.option_list import Option
 
 
@@ -31,6 +31,7 @@ class MonitorDataTable(DataTable):
         Binding("c", "monitor_country_filter", "Country"),
         Binding("b", "monitor_browser", "Browser"),
         Binding("y", "monitor_copy", "Copy"),
+        Binding("enter", "monitor_details", "Details", priority=True),
     ]
 
     def action_monitor_quit(self):
@@ -50,6 +51,38 @@ class MonitorDataTable(DataTable):
 
     def action_monitor_copy(self):
         self.app.action_copy_connection()
+
+    def action_monitor_details(self):
+        self.app.action_details()
+
+
+class ProxyDetailsScreen(ModalScreen[None]):
+    """Full analytics for the proxy selected in the compact table."""
+
+    DEFAULT_CSS = """
+    ProxyDetailsScreen { align: center middle; background: $background 60%; }
+    ProxyDetailsScreen > Vertical {
+        width: 72; height: auto; max-height: 90%;
+        padding: 1 2; border: round $primary; background: $surface;
+    }
+    ProxyDetailsScreen .hint { color: $text-muted; margin-top: 1; }
+    """
+    BINDINGS = [
+        Binding("enter", "close", "Close"),
+        Binding("escape", "close", "Close"),
+    ]
+
+    def __init__(self, details):
+        super().__init__()
+        self.details = details
+
+    def compose(self):
+        with Vertical():
+            yield Static(self.details, id="proxy-details")
+            yield Label("Enter/Esc close", classes="hint")
+
+    def action_close(self):
+        self.dismiss(None)
 
 
 class _ApplyingSelectionList(SelectionList):

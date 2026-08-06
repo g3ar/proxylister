@@ -107,19 +107,35 @@ By default, a successful browser remains visible briefly for inspection. On a se
 
 `--browser-check` requires `--url`, and `--headless` requires `--browser-check`.
 
-### Search for stable proxies over time
+### Monitor proxies until they become stable
 
 ```bash
 ./proxytools monitor
 ```
 
-The monitor immediately restores previously saved candidates, rechecks them, downloads fresh candidates from ProxyScrape, and keeps both groups moving through independent work queues.
+The monitor continuously finds, checks, and rechecks proxies in a full-screen terminal interface. It is useful when a single scan is not enough and you want candidates that have remained healthy across multiple checks over time.
 
-The compact table shows `State`, `Country`, `Median`, `Alive`, and `Connection` only for proxies whose latency has actually been measured. Rows are grouped by status and sorted by latency inside each group:
+At startup, the monitor immediately shows useful candidates saved during earlier runs, verifies them again, and begins checking newly discovered proxies. Its state is saved automatically, so stopping and restarting the monitor does not discard previously established `STABLE` and `PROBATION` candidates.
+
+The main screen contains a status line, a compact proxy table, and a footer with keyboard controls. The table shows only proxies for which a latency measurement is available:
+
+| Column | Meaning |
+|--------|---------|
+| `State` | Current stability classification; `*` marks a restored proxy awaiting its first fresh check |
+| `Country` | Country resolved from the exit IP observed through the proxy |
+| `Median` | Rolling median response latency |
+| `Alive` | Current continuous healthy period |
+| `Connection` | Complete proxy URL ready to copy or use |
+
+Rows are grouped by state and then ordered by latency:
 
 1. `STABLE`;
 2. `PROBATION`;
 3. `DEGRADED`.
+
+Rows remain in place while checks are completing and are reordered at controlled pass boundaries. This keeps the selected row from jumping while you navigate the table.
+
+The status line reports the current cycle and activity, how many proxies are stable or tracked, how many rows are visible, and which filters are active. During shutdown it is replaced with a clear stopping message.
 
 ### Monitor access to one specific website
 
@@ -127,23 +143,16 @@ The compact table shows `State`, `Country`, `Median`, `Alive`, and `Connection` 
 ./proxytools monitor --url https://whatismyipaddress.com/
 ```
 
-Every proxy must pass both the normal identity check and a lightweight request to this URL. HTTP 403 is accepted because anti-bot sites frequently reject `requests` while remaining usable in an interactive browser. Other HTTP errors and network failures fail the complete check.
+Every proxy must pass both the normal HTTPS identity check and a lightweight request to this URL. HTTP 403 is accepted because anti-bot sites frequently reject automated requests while remaining usable in a browser. Other HTTP errors and network failures prevent the check from being accepted.
 
 When a URL is configured, pressing `b` opens that same address through the selected proxy.
 
-### Monitor with diagnostic columns
-
-```bash
-./proxytools monitor --debug
-```
-
-This restores the full diagnostic table: checks, streak, success rate, P95, jitter, city, measured exit IP, and the conditions currently preventing a proxy from becoming stable. It also shows separate active-pool and discovery-pool counters in the status bar.
-
-## Monitor controls
+## Using the monitor
 
 | Key | Action |
 |-----|--------|
 | Arrow keys | Select and scroll rows |
+| `Enter` | Open detailed analytics for the selected proxy; `Enter` or `Esc` closes it |
 | `s` | Choose visible statuses |
 | `p` | Choose visible protocols |
 | `c` | Search for and select a country |
@@ -151,13 +160,48 @@ This restores the full diagnostic table: checks, streak, success rate, P95, jitt
 | `y` | Copy the selected connection string to the terminal clipboard |
 | `q` | Stop the monitor and quit |
 
-State, protocol, and country filters work together. By default, `STABLE` and `PROBATION` are visible and `DEGRADED` is hidden.
+### Inspect one proxy
 
-Rows remain in place while an active checking pass is running and are reordered after the pass completes. This prevents the selected proxy from constantly jumping around the table.
+Select a row and press `Enter` to open its complete analytics without leaving the monitor. The detail window shows:
 
-Copying uses the terminal's OSC 52 clipboard protocol and requires no `xclip` or `xsel`. Most current terminals support it locally and through SSH, although a terminal or multiplexer may disable clipboard escape sequences for security.
+- connection string, state, and restored marker;
+- country, city, and measured exit IP;
+- healthy time, total observed uptime, retained checks, success streak, and success rate;
+- current conditions preventing stable admission;
+- median latency, P95 latency, and jitter;
+- first observation and most recent failure times.
 
-When `q` is pressed, the monitor displays a stopping message and waits for active requests to finish or reach their configured timeout.
+Press `Enter` or `Esc` to close the detail window and return to the same table selection.
+
+### Filter the table
+
+The state, protocol, and country filters work together. By default, the table includes `STABLE` and `PROBATION`, all supported protocols, and every country. `DEGRADED` proxies are hidden until enabled with `s`.
+
+- Press `s` or `p`, use the arrow keys and Space to change selections, then press `Enter` to apply.
+- Press `c`, type part of a country name, use the arrows if needed, and press `Enter` to apply.
+- Choose `All countries` in the country picker to clear that filter.
+
+The status line always lists the filters currently applied. An empty selection is allowed and produces an empty table until the filter is changed again.
+
+### Copy or open the selected proxy
+
+Press `y` to copy the complete connection string, such as `socks5://198.51.100.20:1080`. Copying uses the terminal's OSC 52 protocol and requires no `xclip` or `xsel`. Most current terminals support it locally and through SSH, although terminal or multiplexer security settings may disable it.
+
+Press `b` to open the configured URL through the selected proxy in a disposable private browser session. If no `--url` or `URL` setting is configured, the browser opens a blank page so you can enter an address manually.
+
+- Chrome/Chromium uses incognito mode and a temporary user-data directory.
+- Firefox uses private mode and a generated temporary profile.
+- The regular browser profile, cookies, history, and proxy settings are not modified.
+- Only one browser session can be launched by one monitor at a time.
+- Temporary profile data is removed after the launched browser closes.
+
+`MONITOR_BROWSER` in `proxytools.conf` selects `auto`, `chrome`, or `firefox`. In `auto` mode, Chrome/Chromium is preferred and Firefox is used as a fallback.
+
+Private browsing isolates the temporary session from the main profile. It is not a complete anonymity guarantee.
+
+### Stop the monitor
+
+Press `q` to stop. The monitor displays shutdown progress, allows active network requests to finish or reach their configured timeout, preserves useful monitor state, and then exits.
 
 ## Proxy statuses
 
@@ -177,12 +221,12 @@ The proxy continued to fail after its recovery grace period. Degraded proxies ar
 
 ### Restored marker `*`
 
-A status ending in `*` was restored from the local database and has not yet been verified during the current run. The asterisk is only a marker; it is not a separate status.
+A status ending in `*` was restored from saved monitor state and has not yet been verified during the current run. The asterisk is only a temporary marker, not a separate state.
 
 ## Understanding the measurements
 
 - **Alive** — continuous healthy period used for stability admission; tolerated isolated failures do not reset it immediately.
-- **Checks** — rolling checks retained versus the number required for admission.
+- **Checks** — recent checks retained versus the number required for admission.
 - **Streak** — consecutive complete successful checks.
 - **OK** — complete success rate over the rolling history.
 - **Median** — median of measured proxy latencies.
@@ -190,26 +234,12 @@ A status ending in `*` was restored from the local database and has not yet been
 - **Jitter** — deviation of measured latencies.
 - **Country** — location resolved locally from the measured HTTPS exit IP.
 
-Proxy Tools distinguishes two important facts internally:
+One successful response is not enough to make a proxy stable. The monitor distinguishes:
 
 - **reachable** means the proxy answered and latency was measured;
 - **accepted** means the complete check passed, including latency and the optional target URL.
 
-This is why a proxy can have a measured median while still being in probation or degraded.
-
-## Opening a selected proxy in a browser
-
-Press `b` in the monitor to open the selected proxy in a disposable private session.
-
-- Chrome/Chromium uses incognito mode and a temporary user-data directory.
-- Firefox uses private mode and a generated temporary profile.
-- The regular browser profile, cookies, history, and proxy settings are not modified.
-- Only one browser session can be launched by one monitor at a time.
-- Temporary profile data is removed after the launched browser closes.
-
-`MONITOR_BROWSER` in `proxytools.conf` selects `auto`, `chrome`, or `firefox`. In `auto` mode, Chrome/Chromium is preferred and Firefox is used as a fallback.
-
-Private browsing isolates the temporary session from the main profile. It should not be treated as a complete anonymity guarantee.
+This is why a proxy can have a measured median and appear in the table while remaining in `PROBATION` or `DEGRADED`.
 
 ## Configuration
 
