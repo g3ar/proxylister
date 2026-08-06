@@ -24,7 +24,7 @@ from proxytools.config import load_config, positive_float, web_url
 from proxytools.models import ProxyResult
 from proxytools.output.console import console, progress_display
 from proxytools.output.results import filter_and_sort, format_result
-from proxytools.sources.proxyscrape import fetch_all_proxies
+from proxytools.sources.proxyscrape import ProxySourceUnavailable, fetch_all_proxies
 
 
 def build_parser(prog="proxytools list", settings=None):
@@ -69,7 +69,11 @@ def main(argv=None):
     validate_args(parser, args)
     page_timeout = max((args.max_latency * 2) / 1000.0, MIN_PAGE_LOAD_TIMEOUT)
     console.print("[bold]Fetching proxy lists from ProxyScrape[/bold] (http, socks4, socks5)…")
-    entries = fetch_all_proxies(verbose=True)
+    try:
+        entries = fetch_all_proxies(verbose=True)
+    except ProxySourceUnavailable as exc:
+        console.print(f"[bold red]Error:[/bold red] {exc}")
+        return 1
     if not entries:
         console.print("[yellow]No proxies found.[/yellow]")
         return 0
@@ -78,8 +82,10 @@ def main(argv=None):
     working: list[ProxyResult] = []
     valid: list[ProxyResult] = []
     verified: list[ProxyResult] = []
-    browser_futures = set()
+    browser_future = None
+    browser_submitted = 0
     interrupted = False
+    operational_error = False
     network_pool = concurrent.futures.ThreadPoolExecutor(max_workers=settings.workers)
     browser_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1) if args.browser_check else None
     try:
@@ -101,23 +107,37 @@ def main(argv=None):
                         and result.latency_ms < args.max_latency
                     ):
                         valid.append(result)
-                        if browser_pool:
-                            browser_futures.add(
-                                browser_pool.submit(browser_check, result, args.url, page_timeout, args.headless)
-                            )
-                completed = {item for item in browser_futures if item.done()}
-                for item in completed:
-                    browser_futures.remove(item)
-                    checked = item.result()
+                if browser_future is not None and browser_future.done():
+                    checked = browser_future.result()
                     if checked:
                         verified.append(checked)
+                    browser_future = None
+                if browser_pool and browser_future is None and browser_submitted < len(valid):
+                    result_to_check = valid[browser_submitted]
+                    browser_submitted += 1
+                    browser_future = browser_pool.submit(
+                        browser_check, result_to_check, args.url, page_timeout, args.headless
+                    )
                 status = f"{len(working)} working, {len(valid)} valid"
                 if args.browser_check:
                     status += f", {len(verified)} browser verified"
                 progress.update(task, advance=1, status=status)
-        if browser_futures:
-            console.print(f"Waiting for [bold]{len(browser_futures)}[/bold] browser checks…")
-            verified.extend(filter(None, (item.result() for item in concurrent.futures.as_completed(browser_futures))))
+        remaining_browser_checks = len(valid) - browser_submitted + bool(browser_future)
+        if remaining_browser_checks:
+            console.print(
+                f"Waiting for [bold]{remaining_browser_checks}[/bold] browser checks…"
+            )
+        while browser_pool and (browser_future is not None or browser_submitted < len(valid)):
+            if browser_future is None:
+                result_to_check = valid[browser_submitted]
+                browser_submitted += 1
+                browser_future = browser_pool.submit(
+                    browser_check, result_to_check, args.url, page_timeout, args.headless
+                )
+            checked = browser_future.result()
+            if checked:
+                verified.append(checked)
+            browser_future = None
         console.print(f"[bold green]{len(working)}[/bold green]/{len(entries)} proxies are working.")
     except KeyboardInterrupt:
         interrupted = True
@@ -125,13 +145,17 @@ def main(argv=None):
             f"[yellow]Interrupted — cancelling queued checks and waiting for active requests; "
             f"{len(working)} results collected.[/yellow]"
         )
-    except RuntimeError as exc:
+    except Exception as exc:
         interrupted = True
-        console.print(f"[bold red]Error:[/bold red] {exc}", stderr=True)
+        operational_error = True
+        console.print(f"[bold red]Error:[/bold red] {exc}")
     finally:
         network_pool.shutdown(wait=True, cancel_futures=interrupted)
         if browser_pool:
             browser_pool.shutdown(wait=True, cancel_futures=interrupted)
+
+    if operational_error:
+        return 1
 
     selected = filter_and_sort(verified if args.browser_check else valid, args.max_latency)
     qualifier = "browser-verified" if args.browser_check else f"faster than {args.max_latency:g}ms"

@@ -197,6 +197,10 @@ Normal stdout is intentionally machine-friendly: one connection string per
 line. Keep diagnostics behind `list --debug`, and never mix progress text into
 stdout because users pipe and redirect it.
 
+A successful scan with no usable proxies returns zero. Complete source failure
+or an unexpected worker failure returns nonzero. Selenium validation remains
+strictly sequential and keeps at most one browser future submitted at a time.
+
 ## `monitor` flow
 
 `MonitorEngine` owns scheduling and state; `ProxyMonitorApp` owns presentation.
@@ -222,6 +226,11 @@ The engine publishes immutable `MonitorSnapshot` values:
 
 Candidates without measured latency stay in backend queues but are omitted
 from visible snapshots.
+
+One failed candidate future is recorded as a failed check and must not stop the
+engine. A failed source refresh publishes a visible retry status, preserves the
+current histories, and schedules another refresh instead of terminating the
+monitor.
 
 ### TUI rules
 

@@ -9,6 +9,55 @@ from proxytools.stability.history import ProxyHistory
 
 
 class MonitorEngineTests(unittest.TestCase):
+    def test_source_failure_is_reported_and_retried(self):
+        stop = threading.Event()
+        snapshots = []
+        fetches = 0
+
+        def fetcher():
+            nonlocal fetches
+            fetches += 1
+            if fetches == 1:
+                raise RuntimeError("temporary outage")
+            return [("http", "1.2.3.4:80")]
+
+        def checker(protocol, proxy, *_args):
+            stop.set()
+            return ProxyResult(protocol, proxy, True, 50, "France")
+
+        engine = MonitorEngine(
+            policy=StabilityPolicy(StabilityConfig()), workers=2, timeout=1,
+            samples=1, refresh_interval=0.01, retention_time=60,
+            fetcher=fetcher, checker=checker,
+        )
+        engine.run(stop, snapshots.append)
+
+        error = next(snapshot for snapshot in snapshots if snapshot.phase == "source_error")
+        self.assertEqual(error.message, "temporary outage")
+        self.assertGreaterEqual(fetches, 2)
+
+    def test_checker_exception_records_failure_without_stopping_engine(self):
+        stop = threading.Event()
+        attempts = 0
+
+        def checker(protocol, proxy, *_args):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise ValueError("bad GeoIP record")
+            stop.set()
+            return ProxyResult(protocol, proxy, True, 50, "France")
+
+        engine = MonitorEngine(
+            policy=StabilityPolicy(StabilityConfig()), workers=2, timeout=1,
+            samples=1, refresh_interval=0.01, retention_time=60,
+            fetcher=lambda: [("http", "1.2.3.4:80")], checker=checker,
+        )
+        engine.run(stop, lambda _snapshot: None)
+
+        history = engine.histories[("http", "1.2.3.4:80")]
+        self.assertGreaterEqual(attempts, 2)
+        self.assertEqual(history.samples[0].failure_reason, "check error")
     def test_snapshot_hides_proxy_without_measured_latency(self):
         engine = MonitorEngine(
             policy=StabilityPolicy(StabilityConfig()), workers=1, timeout=1,

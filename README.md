@@ -96,6 +96,9 @@ Debug output includes latency, protocol, address, connection string, country, co
 ```
 
 After lightweight checks pass, Selenium opens Chrome through each candidate proxy and verifies that the page loads. Browser checks run one at a time because launching many Chrome instances is expensive.
+Only the current browser check is submitted to Selenium; the remaining valid
+proxies wait in the normal result list. This keeps the manual, visible workflow
+sequential without building a large browser-work queue.
 
 By default, a successful browser remains visible briefly for inspection. On a server without a graphical session, use:
 
@@ -344,6 +347,11 @@ The first real command creates `.venv`, installs dependencies, and downloads the
 ### Few or no proxies are found
 
 Public proxies are short-lived and unreliable. Try a larger `TIMEOUT`, a higher `MAX_LATENCY`, or another run after ProxyScrape updates its lists. A restrictive `--url` can reduce the result set dramatically.
+
+If all ProxyScrape requests fail, `list` reports an error and exits nonzero so
+scripts can distinguish an unavailable source from a successful scan with no
+usable proxies. The monitor keeps saved candidates active, shows the source
+failure in its status line, and retries discovery automatically.
 
 ### Browser validation fails
 

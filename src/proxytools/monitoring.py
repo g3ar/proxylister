@@ -9,6 +9,7 @@ import time
 from typing import Callable
 
 from proxytools.checking import check_proxy, check_url, connection_string
+from proxytools.models import ProxyResult
 from proxytools.sources.proxyscrape import fetch_all_proxies
 from proxytools.stability import StabilityPolicy
 from proxytools.stability.history import update_advertised
@@ -56,6 +57,7 @@ class MonitorSnapshot:
     discovery_checked: int = 0
     discovery_total: int = 0
     resort: bool = False
+    message: str = ""
 
 
 class MonitorEngine:
@@ -101,6 +103,7 @@ class MonitorEngine:
         self, checked=0, total=0, phase="idle", next_cycle_in=None,
         changed_keys=None, *, active_checked=0, active_total=0,
         discovery_checked=0, discovery_total=0, resort=False,
+        message="",
     ):
         now = time.monotonic()
         changed_keys = set(changed_keys or ())
@@ -164,6 +167,7 @@ class MonitorEngine:
             discovery_checked=discovery_checked,
             discovery_total=discovery_total,
             resort=resort,
+            message=message,
         )
 
     def run(
@@ -209,7 +213,17 @@ class MonitorEngine:
                     next_active_at = now + self.refresh_interval
 
                 if source_future is not None and source_future.done():
-                    entries = source_future.result()
+                    try:
+                        entries = source_future.result()
+                    except Exception as error:
+                        source_future = None
+                        next_source_at = time.monotonic() + self.refresh_interval
+                        publish(self.snapshot(
+                            phase="source_error",
+                            next_cycle_in=max(1, round(self.refresh_interval)),
+                            message=str(error),
+                        ))
+                        continue
                     source_future = None
                     advertised_at = time.monotonic()
                     update_advertised(
@@ -263,7 +277,13 @@ class MonitorEngine:
                         lane_finished = not discovery_pending
                         if lane_finished:
                             next_source_at = time.monotonic() + self.refresh_interval
-                    result = future.result()
+                    try:
+                        result = future.result()
+                    except Exception:
+                        result = ProxyResult(
+                            key[0], key[1], reachable=False,
+                            failure_reason="check error",
+                        )
                     history = self.histories.get(key)
                     if history is not None:
                         self._record_result(history, result)

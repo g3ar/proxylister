@@ -1,7 +1,10 @@
 import argparse
+import contextlib
+import io
 import os
+import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import requests
 
@@ -46,6 +49,76 @@ class ProxyLibraryTests(unittest.TestCase):
                 proxyscrape.fetch_all_proxies(),
                 [("http", "1.2.3.4:80"), ("socks4", "1.2.3.4:80")],
             )
+
+    def test_complete_source_failure_is_distinct_from_an_empty_list(self):
+        with patch.object(
+            proxyscrape, "fetch_proxy_list", side_effect=requests.ConnectionError("offline")
+        ), contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(proxyscrape.ProxySourceUnavailable):
+                proxyscrape.fetch_all_proxies()
+
+    def test_list_returns_failure_when_proxy_source_is_unavailable(self):
+        with patch.object(
+            list_command, "fetch_all_proxies",
+            side_effect=proxyscrape.ProxySourceUnavailable("offline"),
+        ), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(list_command.main([]), 1)
+
+    def test_browser_validation_submits_only_one_check_at_a_time(self):
+        first_browser_started = threading.Event()
+        release_browser = threading.Event()
+        browser_submissions = 0
+        real_executor = list_command.concurrent.futures.ThreadPoolExecutor
+
+        class TrackingBrowserExecutor:
+            def __init__(self, max_workers):
+                nonlocal browser_submissions
+                self.executor = real_executor(max_workers=max_workers)
+                self.is_browser = max_workers == 1
+
+            def submit(self, function, *args):
+                nonlocal browser_submissions
+                if self.is_browser:
+                    browser_submissions += 1
+                return self.executor.submit(function, *args)
+
+            def shutdown(self, **kwargs):
+                return self.executor.shutdown(**kwargs)
+
+        settings = Mock(
+            url=None, max_latency=500, workers=2, timeout=1, samples=1
+        )
+        candidates = [("http", f"192.0.2.{index}:80") for index in range(1, 4)]
+
+        def browser_check(result, *_args):
+            first_browser_started.set()
+            release_browser.wait(2)
+            return result
+
+        with patch.object(list_command, "load_config", return_value=settings), patch.object(
+            list_command, "fetch_all_proxies", return_value=candidates
+        ), patch.object(
+            list_command, "check_candidate",
+            side_effect=lambda protocol, proxy, *_args: ProxyResult(
+                protocol, proxy, True, 50
+            ),
+        ), patch.object(
+            list_command, "browser_check", side_effect=browser_check
+        ), patch.object(
+            list_command.concurrent.futures, "ThreadPoolExecutor", TrackingBrowserExecutor
+        ), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            runner = threading.Thread(
+                target=list_command.main,
+                args=(["--url", "https://example.com", "--browser-check", "--headless"],),
+            )
+            runner.start()
+            self.assertTrue(first_browser_started.wait(1))
+            self.assertEqual(browser_submissions, 1)
+            release_browser.set()
+            runner.join(3)
+
+        self.assertFalse(runner.is_alive())
+        self.assertEqual(browser_submissions, len(candidates))
 
     def test_check_proxy_uses_median_complete_duration(self):
         response = FakeResponse(payload={"ip": "203.0.113.20"})

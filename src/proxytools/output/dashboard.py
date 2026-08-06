@@ -245,6 +245,10 @@ class ProxyMonitorApp(App):
             "checking_new": f"Checking proxies {snapshot.checked}/{snapshot.total}",
             "checking": f"Checking proxies {snapshot.checked}/{snapshot.total}",
             "waiting": f"Next check in {snapshot.next_cycle_in}s",
+            "source_error": (
+                f"Proxy source failed: {snapshot.message}; "
+                f"retrying in {snapshot.next_cycle_in}s"
+            ),
         }.get(snapshot.phase, snapshot.phase.replace("_", " ").capitalize())
         filters = self._active_filter_labels()
         text = phase if not filters else f"{phase}\nFilters │ {' │ '.join(filters)}"

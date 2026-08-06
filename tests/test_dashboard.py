@@ -46,6 +46,21 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
                 "Filters │ including degraded │ SOCKS5 │ France",
             )
 
+            app.selected_states = {"STABLE", "PROBATION"}
+            app.selected_protocols = {"http", "socks4", "socks5"}
+            app.country_filter = ""
+            app._render_status(
+                MonitorSnapshot(
+                    4, 0, 0, 0, 8, "source_error", 10, (),
+                    message="all ProxyScrape requests failed",
+                )
+            )
+            self.assertEqual(
+                str(app.query_one("#status", Static).content),
+                "Proxy source failed: all ProxyScrape requests failed; "
+                "retrying in 10s",
+            )
+
     async def test_f1_opens_shared_about_information(self):
         app = ProxyMonitorApp(Mock(), autostart=False)
 
