@@ -1,10 +1,12 @@
 import argparse
+import os
 import unittest
 from unittest.mock import patch
 
 import requests
 
 from proxytools import config
+from proxytools import http
 from proxytools.commands import list as list_command
 from proxytools.checking import proxy as checker
 from proxytools.models import ProxyResult
@@ -16,6 +18,7 @@ class FakeResponse:
         self.text = text
         self.status_code = status_code
         self._payload = payload or {}
+        self.closed = False
 
     def raise_for_status(self):
         if self.status_code >= 400:
@@ -25,7 +28,7 @@ class FakeResponse:
         return self._payload
 
     def close(self):
-        pass
+        self.closed = True
 
 
 class ProxyLibraryTests(unittest.TestCase):
@@ -34,6 +37,7 @@ class ProxyLibraryTests(unittest.TestCase):
         with patch.object(proxyscrape, "session") as session:
             session.return_value.get.return_value = response
             self.assertEqual(proxyscrape.fetch_proxy_list("http"), ["1.2.3.4:80", "5.6.7.8:1080"])
+        self.assertTrue(response.closed)
 
     def test_all_protocols_for_same_address_are_preserved(self):
         lists = {"http": ["1.2.3.4:80"], "socks4": ["1.2.3.4:80"], "socks5": []}
@@ -45,14 +49,14 @@ class ProxyLibraryTests(unittest.TestCase):
 
     def test_check_proxy_uses_median_complete_duration(self):
         response = FakeResponse(payload={"ip": "203.0.113.20"})
-        with patch.object(checker, "session") as session, patch.object(
+        with patch.object(checker, "proxy_session") as proxy_session, patch.object(
             checker, "locate", return_value={
                 "country": "Germany", "city": "Nuremberg", "lat": 49.45, "lon": 11.08,
             }
         ), patch.object(
             checker.time, "perf_counter", side_effect=[0.0, 0.3, 1.0, 1.1, 2.0, 2.2]
         ):
-            session.return_value.get.return_value = response
+            proxy_session.return_value.__enter__.return_value.get.return_value = response
             result = checker.check_proxy("http", "1.2.3.4:80", samples=3)
         self.assertTrue(result.reachable)
         self.assertEqual(result.latency_ms, 200)
@@ -61,8 +65,8 @@ class ProxyLibraryTests(unittest.TestCase):
 
     def test_monitor_url_check_accepts_antibot_403_but_not_404(self):
         result = ProxyResult("http", "1.2.3.4:80", True, 50)
-        with patch.object(checker, "session") as session:
-            response = session.return_value.get.return_value
+        with patch.object(checker, "proxy_session") as proxy_session:
+            response = proxy_session.return_value.__enter__.return_value.get.return_value
             response.status_code = 403
             self.assertFalse(checker.check_url(result, "https://example.com", 3))
             self.assertTrue(
@@ -76,6 +80,35 @@ class ProxyLibraryTests(unittest.TestCase):
                     result, "https://example.com", 3, accept_forbidden=True
                 )
             )
+
+    def test_proxy_session_closes_all_cached_proxy_connections(self):
+        with patch.object(http.requests, "Session") as session_factory:
+            with http.proxy_session() as current:
+                self.assertIs(current, session_factory.return_value)
+            session_factory.return_value.close.assert_called_once_with()
+
+    def test_repeated_proxy_checks_do_not_accumulate_descriptors(self):
+        class DescriptorSession:
+            def __init__(self):
+                self.read_fd, self.write_fd = os.pipe()
+
+            def get(self, *_args, **_kwargs):
+                return FakeResponse(payload={"ip": "203.0.113.20"})
+
+            def close(self):
+                os.close(self.read_fd)
+                os.close(self.write_fd)
+
+        baseline = len(os.listdir("/proc/self/fd"))
+        location = {"country": "France", "city": "Paris", "lat": 1, "lon": 2}
+        with patch.object(http.requests, "Session", side_effect=DescriptorSession), patch.object(
+            checker, "locate", return_value=location
+        ):
+            for index in range(250):
+                result = checker.check_proxy("http", f"192.0.2.{index % 250}:8080")
+                self.assertTrue(result.reachable)
+
+        self.assertLessEqual(len(os.listdir("/proc/self/fd")), baseline + 1)
 
     def test_list_candidate_uses_identity_result_and_lightweight_url_check(self):
         result = ProxyResult("http", "1.2.3.4:80", True, 50)

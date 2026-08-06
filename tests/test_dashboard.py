@@ -1,5 +1,6 @@
 import unittest
 from dataclasses import replace
+from unittest.mock import Mock
 
 from textual.widgets import DataTable, SelectionList, Static
 
@@ -16,9 +17,29 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
 
         normal_labels = {label for label, _key in normal.columns}
         debug_labels = {label for label, _key in debug.columns}
-        diagnostics = {"City", "Exit IP", "Blocked by"}
+        self.assertEqual(normal_labels, {"State", "Country", "Median", "Alive", "Connection"})
+        diagnostics = {
+            "Checks", "Streak", "OK", "P95", "Jitter",
+            "City", "Exit IP", "Blocked by",
+        }
         self.assertTrue(diagnostics.isdisjoint(normal_labels))
         self.assertTrue(diagnostics <= debug_labels)
+
+    async def test_normal_status_hides_backend_lane_details(self):
+        app = ProxyMonitorApp(Mock(), autostart=False)
+        snapshot = MonitorSnapshot(
+            3, 3, 10, 2, 8, "running", None, (),
+            active_checked=1, active_total=4,
+            discovery_checked=2, discovery_total=6,
+        )
+
+        async with app.run_test() as pilot:
+            app.receive_snapshot(snapshot)
+            await pilot.pause()
+            status = str(app.query_one("#status", Static).content)
+            self.assertIn("Checking 3/10", status)
+            self.assertNotIn("Active", status)
+            self.assertNotIn("Discovery", status)
 
     async def test_snapshot_populates_table_and_details(self):
         engine = MonitorEngine(
@@ -53,6 +74,8 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.query_one(DataTable).row_count, 1)
             self.assertIn("Checking 4/10", str(app.query_one("#status", Static).content))
             self.assertIn("Blocked by: alive, checks", str(app.query_one("#details", Static).content))
+            await pilot.press("y")
+            self.assertEqual(app._clipboard, row.connection)
             second_row = replace(
                 row,
                 key=("socks5", "5.6.7.8:80"),

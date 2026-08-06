@@ -5,7 +5,7 @@ import time
 
 import requests
 
-from proxytools.http import session
+from proxytools.http import proxy_session
 from proxytools.geoip import locate
 from proxytools.models import ProxyResult
 
@@ -20,24 +20,25 @@ def check_proxy(protocol: str, proxy: str, timeout: float = 5, samples: int = 1)
     conn = connection_string(protocol, proxy)
     durations = []
     data = None
-    for _ in range(samples):
-        started = time.perf_counter()
-        try:
-            response = session().get(
-                IDENTITY_URL,
-                proxies={"http": conn, "https": conn},
-                timeout=timeout,
-            )
+    with proxy_session() as client:
+        for _ in range(samples):
+            started = time.perf_counter()
             try:
-                candidate = response.json()
-                if response.status_code != 200 or not candidate.get("ip"):
-                    return ProxyResult(protocol, proxy, reachable=False)
-                durations.append(round((time.perf_counter() - started) * 1000))
-                data = candidate
-            finally:
-                response.close()
-        except (requests.RequestException, ValueError):
-            return ProxyResult(protocol, proxy, reachable=False)
+                response = client.get(
+                    IDENTITY_URL,
+                    proxies={"http": conn, "https": conn},
+                    timeout=timeout,
+                )
+                try:
+                    candidate = response.json()
+                    if response.status_code != 200 or not candidate.get("ip"):
+                        return ProxyResult(protocol, proxy, reachable=False)
+                    durations.append(round((time.perf_counter() - started) * 1000))
+                    data = candidate
+                finally:
+                    response.close()
+            except (requests.RequestException, ValueError):
+                return ProxyResult(protocol, proxy, reachable=False)
     if data is None:
         return ProxyResult(protocol, proxy, reachable=False)
     exit_ip = data["ip"]
@@ -70,24 +71,25 @@ def check_url(
     """
     conn = connection_string(result.protocol, result.proxy)
     try:
-        response = session().get(
-            url,
-            proxies={"http": conn, "https": conn},
-            timeout=timeout,
-            stream=True,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-                ),
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            },
-        )
-        try:
-            return response.status_code < 400 or (
-                accept_forbidden and response.status_code == 403
+        with proxy_session() as client:
+            response = client.get(
+                url,
+                proxies={"http": conn, "https": conn},
+                timeout=timeout,
+                stream=True,
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+                    ),
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                },
             )
-        finally:
-            response.close()
+            try:
+                return response.status_code < 400 or (
+                    accept_forbidden and response.status_code == 403
+                )
+            finally:
+                response.close()
     except requests.RequestException:
         return False

@@ -115,7 +115,7 @@ By default, a successful browser remains visible briefly for inspection. On a se
 
 The monitor immediately restores previously saved candidates, rechecks them, downloads fresh candidates from ProxyScrape, and keeps both groups moving through independent work queues.
 
-The main table shows only proxies for which latency has actually been measured. Rows are grouped by status and sorted by latency inside each group:
+The compact table shows `State`, `Country`, `Median`, `Alive`, and `Connection` only for proxies whose latency has actually been measured. Rows are grouped by status and sorted by latency inside each group:
 
 1. `STABLE`;
 2. `PROBATION`;
@@ -137,7 +137,7 @@ When a URL is configured, pressing `b` opens that same address through the selec
 ./proxytools monitor --debug
 ```
 
-This additionally shows city, measured exit IP, and the conditions currently preventing a proxy from becoming stable.
+This restores the full diagnostic table: checks, streak, success rate, P95, jitter, city, measured exit IP, and the conditions currently preventing a proxy from becoming stable. It also shows separate active-pool and discovery-pool counters in the status bar.
 
 ## Monitor controls
 
@@ -148,11 +148,14 @@ This additionally shows city, measured exit IP, and the conditions currently pre
 | `p` | Choose visible protocols |
 | `c` | Search for and select a country |
 | `b` | Open the selected proxy in a private browser session |
+| `y` | Copy the selected connection string to the terminal clipboard |
 | `q` | Stop the monitor and quit |
 
 State, protocol, and country filters work together. By default, `STABLE` and `PROBATION` are visible and `DEGRADED` is hidden.
 
 Rows remain in place while an active checking pass is running and are reordered after the pass completes. This prevents the selected proxy from constantly jumping around the table.
+
+Copying uses the terminal's OSC 52 clipboard protocol and requires no `xclip` or `xsel`. Most current terminals support it locally and through SSH, although a terminal or multiplexer may disable clipboard escape sequences for security.
 
 When `q` is pressed, the monitor displays a stopping message and waits for active requests to finish or reach their configured timeout.
 

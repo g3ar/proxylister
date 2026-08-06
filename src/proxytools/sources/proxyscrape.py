@@ -25,8 +25,11 @@ def fetch_proxy_list(protocol: str, timeout_ms: int = 10000, country: str = "all
         "anonymity": "all",
     }
     response = session().get(API_URL, params=params, timeout=15)
-    response.raise_for_status()
-    return sorted(set(PROXY_RE.findall(response.text)))
+    try:
+        response.raise_for_status()
+        return sorted(set(PROXY_RE.findall(response.text)))
+    finally:
+        response.close()
 
 
 def fetch_all_proxies(verbose: bool = False) -> list[tuple[str, str]]:

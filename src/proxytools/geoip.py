@@ -56,6 +56,7 @@ def ensure_geoip_database(*, timeout=60, now=None) -> GeoIPStatus:
 
     compressed = None
     unpacked = None
+    response = None
     try:
         response = requests.get(DBIP_URL.format(version=version), stream=True, timeout=timeout)
         response.raise_for_status()
@@ -66,7 +67,6 @@ def ensure_geoip_database(*, timeout=60, now=None) -> GeoIPStatus:
             for chunk in response.iter_content(chunk_size=1024 * 1024):
                 if chunk:
                     archive.write(chunk)
-        response.close()
         with tempfile.NamedTemporaryFile(
             dir=database.parent, prefix=".proxytools-geoip-", delete=False
         ) as target:
@@ -84,6 +84,8 @@ def ensure_geoip_database(*, timeout=60, now=None) -> GeoIPStatus:
             return GeoIPStatus(database, warning=f"GeoIP update failed; using existing database: {error}")
         return GeoIPStatus(None, warning=f"GeoIP database unavailable; locations will be Unknown: {error}")
     finally:
+        if response is not None:
+            response.close()
         for temporary in (compressed, unpacked):
             if temporary is not None:
                 temporary.unlink(missing_ok=True)

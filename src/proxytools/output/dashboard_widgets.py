@@ -30,6 +30,7 @@ class MonitorDataTable(DataTable):
         Binding("p", "monitor_protocols", "Protocols"),
         Binding("c", "monitor_country_filter", "Country"),
         Binding("b", "monitor_browser", "Browser"),
+        Binding("y", "monitor_copy", "Copy"),
     ]
 
     def action_monitor_quit(self):
@@ -46,6 +47,9 @@ class MonitorDataTable(DataTable):
 
     def action_monitor_browser(self):
         self.app.action_browser()
+
+    def action_monitor_copy(self):
+        self.app.action_copy_connection()
 
 
 class _ApplyingSelectionList(SelectionList):

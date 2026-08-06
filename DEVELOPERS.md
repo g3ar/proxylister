@@ -34,7 +34,7 @@ src/proxytools/
   process_lock.py           advisory per-clone process lock
   geoip.py                  monthly DB-IP download and local lookup reader
   models.py                 shared result records
-  http.py                   thread-local requests sessions
+  http.py                   bounded Requests session lifecycles
   browser.py                disposable interactive browser launcher
   browser_session.py        detached temporary-profile lifecycle helper
   commands/
@@ -136,6 +136,8 @@ This single HTTPS request provides three signals:
 
 Latency is the median complete duration across configured samples. Country, city, and coordinates are resolved locally from the exit IP; the identity service is not trusted for geolocation.
 
+Each logical proxy check uses a short-lived `proxy_session`. This is required for long-running monitors: Requests caches a connection manager for every distinct proxy URL, and a shared session fed an unbounded sequence of public proxies will otherwise retain sockets until the process reaches its file-descriptor limit. Every response and proxy session must be closed on success, validation failure, and exceptions. Direct calls to bounded upstream services may use the thread-local session.
+
 ### Reachability versus acceptance
 
 These concepts must remain separate throughout the codebase:
@@ -184,6 +186,8 @@ An overlap guard prevents the same `(protocol, address)` from running in both la
 The engine publishes full snapshots at phase boundaries and incremental snapshots while checks complete. Incremental updates contain only changed rows. Waiting snapshots update countdown/status information without forcing the dashboard to rewrite thousands of cells.
 
 The dashboard preserves selection and scroll position, updates only changed cells, rebuilds large filtered views in small event-loop chunks, and sorts only at controlled pass boundaries.
+
+Normal mode deliberately keeps only State, Country, Median, Alive, and Connection in the table. Diagnostic columns and separate active/discovery counters belong to `--debug`; detailed quality data remains available in the selected-row panel. The `y` action uses Textual's OSC 52 clipboard support and must not introduce platform clipboard dependencies.
 
 Candidates without any measured latency remain in engine queues but are omitted from visible snapshots.
 
