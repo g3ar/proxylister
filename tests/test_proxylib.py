@@ -73,7 +73,10 @@ class ProxyLibraryTests(unittest.TestCase):
                 "longitude": 11.08,
             }
         )
-        with patch.object(checker, "session") as session:
+        with patch.object(checker, "locate", return_value={
+            "country": "Germany", "city": "Nuremberg",
+            "lat": 49.45, "lon": 11.08,
+        }), patch.object(checker, "session") as session:
             session.return_value.get.return_value = response
             self.assertTrue(checker.probe_https_route(result, 3))
 

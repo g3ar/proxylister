@@ -16,6 +16,9 @@ show_help() {
         '  monitor    Monitor proxies until they meet stability criteria' \
         '  help       Show this help' \
         '' \
+        'Options:' \
+        '  --clear    Remove local databases, environment, locks, and generated caches' \
+        '' \
         'Run ./proxytools <command> --help for command-specific options.' \
         'On first use, a local .venv and the required dependencies are created automatically.'
 }
@@ -27,6 +30,17 @@ fi
 
 COMMAND=$1
 shift
+
+if [ "$COMMAND" = "--clear" ]; then
+    if ! command -v python3 >/dev/null 2>&1; then
+        printf 'proxytools: python3 is required but was not found in PATH\n' >&2
+        exit 1
+    fi
+    PYTHONPATH="$PROJECT_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
+    PROXYTOOLS_HOME="$PROJECT_DIR"
+    export PYTHONPATH PROXYTOOLS_HOME
+    exec python3 -m proxytools.cleanup
+fi
 
 case "$COMMAND" in
     help|-h|--help)
@@ -57,7 +71,7 @@ fi
 
 BASE_STAMP="$VENV_DIR/.proxytools-requirements"
 if ! cmp -s "$PROJECT_DIR/requirements.txt" "$BASE_STAMP" 2>/dev/null || \
-   ! "$VENV_DIR/bin/python" -c 'import requests, rich, selenium, socks, textual' >/dev/null 2>&1; then
+   ! "$VENV_DIR/bin/python" -c 'import maxminddb, requests, rich, selenium, socks, textual' >/dev/null 2>&1; then
     printf 'Installing dependencies ...\n' >&2
     "$VENV_DIR/bin/python" -m pip install -r "$PROJECT_DIR/requirements.txt"
     cp "$PROJECT_DIR/requirements.txt" "$BASE_STAMP"

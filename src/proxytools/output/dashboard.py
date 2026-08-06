@@ -273,15 +273,17 @@ class ProxyMonitorApp(App):
         ("P95", "p95"),
         ("Jitter", "jitter"),
         ("Country", "country"),
+        ("Connection", "connection"),
+    )
+    DEBUG_COLUMNS = (
         ("City", "city"),
         ("Exit IP", "exit_ip"),
         ("Blocked by", "blocked"),
-        ("Connection", "connection"),
     )
 
     def __init__(
         self, engine: MonitorEngine, *, stable_only=False, autostart=True,
-        browser="auto", browser_url="about:blank",
+        browser="auto", browser_url="about:blank", debug=False,
     ):
         super().__init__()
         self.engine = engine
@@ -297,6 +299,8 @@ class ProxyMonitorApp(App):
         self.completed_cycle = 0
         self.browser = browser
         self.browser_url = browser_url
+        self.debug_ui = debug
+        self.columns = self.COLUMNS[:-1] + (self.DEBUG_COLUMNS if debug else ()) + self.COLUMNS[-1:]
         self.browser_process = None
         self.stopping = False
         self.filter_rebuilding = False
@@ -312,7 +316,7 @@ class ProxyMonitorApp(App):
 
     def on_mount(self):
         table = self.query_one("#table", DataTable)
-        table.add_columns(*self.COLUMNS)
+        table.add_columns(*self.columns)
         table.focus()
         if self.autostart:
             self.monitor_worker()
@@ -387,7 +391,7 @@ class ProxyMonitorApp(App):
                 table.add_row(*cells, key=key)
             else:
                 previous_cells = self.cells_by_key.get(key, ())
-                for index, ((_, column_key), value) in enumerate(zip(self.COLUMNS, cells)):
+                for index, ((_, column_key), value) in enumerate(zip(self.columns, cells)):
                     if index >= len(previous_cells) or value != previous_cells[index]:
                         table.update_cell(key, column_key, value, update_width=False)
             self.rows_by_key[key] = row
@@ -432,7 +436,7 @@ class ProxyMonitorApp(App):
                     row.last_checked_at is None and row != old_row
                 ):
                     previous_cells = self.cells_by_key.get(key, ())
-                    for index, ((_, column_key), value) in enumerate(zip(self.COLUMNS, cells)):
+                    for index, ((_, column_key), value) in enumerate(zip(self.columns, cells)):
                         if index >= len(previous_cells) or value != previous_cells[index]:
                             table.update_cell(key, column_key, value, update_width=False)
                     self.cells_by_key[key] = cells
@@ -485,17 +489,22 @@ class ProxyMonitorApp(App):
         first_seen = self._timestamp(row.first_seen_at)
         last_failure = self._timestamp(row.last_failure_at)
         restored = "  [yellow]Restored from database; awaiting verification[/]" if row.restored else ""
+        diagnostics = ""
+        if self.debug_ui:
+            diagnostics = (
+                f"City: {row.city}    Exit IP: {row.exit_ip or '-'}    Blocked by: {blocked}\n"
+                f"HTTP exit: {row.http_exit_ip or '-'}    HTTPS exit: {row.exit_ip or '-'}    "
+                f"Route: {'split' if row.http_exit_ip and row.exit_ip and row.http_exit_ip != row.exit_ip else 'same/unknown'}"
+            )
         detail = Text.from_markup(
             f"[bold]{row.connection}[/bold]  [{self._state_color(row.state)}]{row.state}{'*' if row.restored else ''}[/]{restored}\n"
-            f"Country: {row.country}    City: {row.city}    Exit IP: {row.exit_ip or '-'}    "
-            f"Alive: {format_duration(row.alive_seconds)}    "
+            f"Country: {row.country}    Alive: {format_duration(row.alive_seconds)}    "
             f"Checks: {row.checks}/{row.required_checks}    Streak: {row.streak}    Success: {row.success_rate:.1%}\n"
             f"Median: {self._milliseconds(row.median_latency)}    P95: {self._milliseconds(row.p95_latency)}    "
-            f"Jitter: {row.jitter}ms    Blocked by: {blocked}\n"
+            f"Jitter: {row.jitter}ms\n"
             f"First seen: {first_seen}    Observed uptime: {format_duration(row.total_observed_uptime)}    "
             f"Last failure: {last_failure}\n"
-            f"HTTP exit: {row.http_exit_ip or '-'}    HTTPS exit: {row.exit_ip or '-'}    "
-            f"Route: {'split' if row.http_exit_ip and row.exit_ip and row.http_exit_ip != row.exit_ip else 'same/unknown'}"
+            f"{diagnostics}"
         )
         self.query_one("#details", Static).update(detail)
 
@@ -682,7 +691,7 @@ class ProxyMonitorApp(App):
         return Text(state, style=cls._state_color(state.removesuffix("*")))
 
     def _row_cells(self, row: MonitorRow):
-        return (
+        cells = (
             self._state_text(f"{row.state}{'*' if row.restored else ''}"),
             format_duration(row.alive_seconds),
             f"{row.checks}/{row.required_checks}",
@@ -692,11 +701,10 @@ class ProxyMonitorApp(App):
             self._milliseconds(row.p95_latency),
             f"{row.jitter}ms",
             row.country,
-            row.city,
-            row.exit_ip or "-",
-            ",".join(row.blockers) or "-",
-            row.connection,
         )
+        if self.debug_ui:
+            cells += (row.city, row.exit_ip or "-", ",".join(row.blockers) or "-")
+        return cells + (row.connection,)
 
     def filtered_rows(self, snapshot: MonitorSnapshot):
         return [row for row in snapshot.rows if self._row_visible(row)]

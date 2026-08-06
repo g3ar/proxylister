@@ -32,6 +32,8 @@ On the first real command, `./proxytools` creates an ignored `.venv` and install
 ./proxytools monitor --help
 ```
 
+To return a clone to its just-cloned runtime state, run `./proxytools --clear`. It refuses to run while another Proxy Tools command owns the clone lock, then removes the local virtual environment, SQLite and GeoIP databases, default `working_proxies.txt` output, lock file, Python bytecode, test caches, and build artifacts. Source files, Git metadata, `.env` files, and custom `--output` exports are preserved. Removed local state is not recoverable.
+
 ## `scan`
 
 Fetches proxies for all protocols (`http`, `socks4`, `socks5`), dedupes them, checks which are alive concurrently, geolocates each, and writes the ones under `--max-latency` to a file, sorted fastest first.
@@ -100,11 +102,12 @@ During long-running monitoring, checks use two independent lanes. Roughly 20% of
 | `--min-success-rate` | Required success ratio from `0` to `1` | `0.8` |
 | `--min-success-streak` | Consecutive successful checks required | `3` |
 | `--min-alive-time` | Required continuous live time in seconds | `60` |
-| `--max-jitter` | Maximum latency standard deviation in ms | `150` |
-| `--alive-failure-tolerance` | Failures allowed before continuous live time resets | `0` |
+| `--max-jitter` | Maximum latency standard deviation in ms | `500` |
+| `--alive-failure-tolerance` | Consecutive failures allowed before continuous live time resets | `2` |
 | `--degraded-after` | Failed seconds allowed after `STABLE` before `DEGRADED` | `60` |
 | `--retention-time` | Continue tracking proxies absent from ProxyScrape for this many seconds | `1800` |
 | `--stable-only` | Hide probation and degraded proxies | off |
+| `--debug` | Show City, Exit IP, Blocked by, and route diagnostics | off |
 | `--browser` | Browser for the `b` action: `auto`, `chrome`, or `firefox` | `auto` |
 | `--browser-url` | HTTP(S) URL every proxy must reach; also opened by `b` | disabled (`b` opens `about:blank`) |
 | `--reset-history` | Delete this clone's saved history before starting | off |
@@ -115,11 +118,13 @@ The browser action detects Chrome/Chromium first and Firefox second when `--brow
 
 When `--browser-url` is supplied, every otherwise successful proxy check makes one additional lightweight `requests` request to that URL through the same proxy. HTTP 2xx/3xx passes. Monitor also accepts HTTP 403 because anti-bot sites may reject `requests` while remaining usable in the interactive browser; other 4xx/5xx responses, timeout, TLS, proxy, and redirect errors fail with the `url` blocker. This happens once after the configured proxy samples, uses `--timeout`, and never invokes Selenium. Without the option there is no target request and `b` opens `about:blank`.
 
-The Textual table is scrollable, supports row selection, and updates a detail panel for the highlighted proxy. It shows state, HTTPS exit IP, country/city, continuous live time, total observed uptime, first seen and last failure times, check count, success streak, rolling success rate, median latency, p95 latency, jitter, blocking criteria, and connection string. With `--browser-url`, an HTTPS GeoIP probe records the browser-like exit route while the original HTTP check is retained for comparison; details label differing addresses as a split route. `Blocked by` explains why a row is not yet stable: `alive`, `checks`, `rate`, `streak`, `latency`, `jitter`, or `failed`. A status bar reports the current phase, cycle progress, tracked/stable counts, and active filters. A proxy that disappears from ProxyScrape continues to be checked until `--retention-time` expires.
+The Textual table is scrollable, supports row selection, and updates a detail panel for the highlighted proxy. Its default view shows state, country, continuous live time, total observed uptime, first seen and last failure times, check count, success streak, rolling success rate, median latency, p95 latency, jitter, and connection string. `--debug` additionally shows City, Exit IP, `Blocked by`, and HTTP/HTTPS route diagnostics. Every successful base check must also complete an HTTPS identity request through the proxy; its exit IP is therefore the route a browser will use. Country, city, and coordinates are resolved locally from that exit IP rather than accepted from a remote GeoIP API. `Blocked by` explains why a row is not yet stable: `alive`, `checks`, `rate`, `streak`, `latency`, `jitter`, `https`, or `failed`. A status bar reports the current phase, cycle progress, tracked/stable counts, and active filters. A proxy that disappears from ProxyScrape continues to be checked until `--retention-time` expires.
+
+On each real `scan` or `monitor` start, Proxy Tools checks the monthly DB-IP City Lite database stored as `proxytools-geoip.mmdb` beside the launcher. A missing or outdated database is downloaded over HTTPS, validated, decompressed, and atomically replaced; both the database and its version marker are ignored by Git. If an update fails, the existing database remains usable. With no local database, checks continue and locations are reported as `Unknown`. GeoIP data attribution: [IP Geolocation by DB-IP](https://db-ip.com).
 
 Only one working command (`scan` or `monitor`) may run from a given clone at a time. The kernel-backed `proxytools.lock` is released automatically even after a crash. Separate clones use separate locks and databases and can run simultaneously. Help and version commands never acquire the lock.
 
-A successful check requires a duration below `--max-latency`. By default, any failed check resets continuous live time. Setting `--alive-failure-tolerance 1`, for example, preserves the original live-time counter through one isolated failure. A `STABLE` proxy gets a separate `--degraded-after` grace period: its first failure moves it to `PROBATION`, it remains in the active lane, and only another failed check after the grace duration moves it to `DEGRADED`. This timer is stored in SQLite and survives restarts; a successful check clears it.
+A new proxy must respond below `--max-latency` to qualify as `STABLE`. Once admitted, a slow response remains a quality miss in its rolling history but does not mean the proxy is dead or demote it by itself. By default, `STABLE` survives two consecutive hard failures; the third moves it to `PROBATION`, resets continuous live time, and starts the `--degraded-after` grace period. Continued hard failures after that period produce `DEGRADED`, while one clean check restores a previously stable proxy immediately. `--alive-failure-tolerance` controls the number of tolerated hard failures. Recovery metadata and the grace timer are stored in SQLite and survive restarts.
 
 ## Tests
 

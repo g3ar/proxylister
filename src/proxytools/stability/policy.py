@@ -17,8 +17,8 @@ class StabilityConfig:
     min_success_streak: int = 3
     min_alive_time: float = 60
     max_latency: float = 500
-    max_jitter: float = 150
-    failure_tolerance: int = 0
+    max_jitter: float = 500
+    failure_tolerance: int = 2
     degraded_after: float = 60
 
 

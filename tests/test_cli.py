@@ -14,6 +14,7 @@ class TopLevelCliTests(unittest.TestCase):
             self.assertEqual(cli.main([]), 0)
         for command in ("scan", "monitor"):
             self.assertIn(command, output.getvalue())
+        self.assertIn("--clear", output.getvalue())
 
     def test_unknown_command_returns_usage_error(self):
         output = io.StringIO()
@@ -30,6 +31,14 @@ class TopLevelCliTests(unittest.TestCase):
     def test_subcommand_program_names(self):
         self.assertEqual(scan.build_parser().prog, "proxytools scan")
         self.assertEqual(monitor.build_parser().prog, "proxytools monitor")
+
+    def test_monitor_uses_forgiving_stability_defaults(self):
+        args = monitor.build_parser().parse_args([])
+        self.assertEqual(args.max_latency, 500)
+        self.assertEqual(args.max_jitter, 500)
+        self.assertEqual(args.alive_failure_tolerance, 2)
+        self.assertFalse(args.debug)
+        self.assertTrue(monitor.build_parser().parse_args(["--debug"]).debug)
 
 
 if __name__ == "__main__":

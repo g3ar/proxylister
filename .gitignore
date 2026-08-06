@@ -20,3 +20,5 @@ proxytools.db
 proxytools.db-wal
 proxytools.db-shm
 proxytools.lock
+proxytools-geoip.mmdb
+proxytools-geoip.version

@@ -37,6 +37,7 @@ class ProxyHistory:
     last_failure_at: float | None = None
     restored: bool = False
     failure_since: float | None = None
+    was_stable: bool = False
 
     def __post_init__(self):
         self.samples = deque(maxlen=self.history_size)
@@ -76,20 +77,23 @@ class ProxyHistory:
     def record(self, result: ProxyResult, now: float, policy: StabilityPolicy) -> None:
         self.restored = False
         config = policy.config
-        succeeded = result.ok and result.latency_ms is not None and result.latency_ms < config.max_latency
+        reachable = result.ok and result.latency_ms is not None
+        succeeded = reachable and result.latency_ms < config.max_latency
+        hard_failure = not reachable
+        recovering = self.was_stable and self.state != "STABLE"
         failure_reason = ""
         if not succeeded:
             failure_reason = result.failure_reason or ("failed" if not result.ok else "latency")
         self.samples.append(
             CheckSample(now, succeeded, result.latency_ms if succeeded else None, failure_reason)
         )
-        if succeeded:
+        if reachable:
             self.latest = result
-            self.consecutive_successes += 1
             self.consecutive_failures = 0
             if self.alive_since is None:
                 self.alive_since = now
             self.failure_since = None
+            self.consecutive_successes = self.consecutive_successes + 1 if succeeded else 0
         else:
             # A target-URL failure still proved that the proxy itself answered
             # and produced geolocation data. Keep it visible in the dashboard,
@@ -98,31 +102,44 @@ class ProxyHistory:
                 self.latest = result
             self.consecutive_successes = 0
             self.consecutive_failures += 1
-            self.stable_since = None
             if self.consecutive_failures > config.failure_tolerance:
                 self.alive_since = None
 
-        if policy.qualifies(self, now):
+        if succeeded and recovering:
+            # A proxy that already earned STABLE only needs one clean recovery
+            # check; it need not repeat the full initial admission period.
+            self.stable_since = now
+            self.failure_since = None
+            self.state = "STABLE"
+        elif policy.qualifies(self, now):
             if self.state != "STABLE":
                 self.stable_since = now
             self.state = "STABLE"
-        elif not succeeded and self.state == "STABLE":
-            self.failure_since = now
-            self.state = "PROBATION"
-        elif not succeeded and self.failure_since is not None:
+        elif hard_failure and self.state == "STABLE":
+            if self.consecutive_failures > config.failure_tolerance:
+                self.stable_since = None
+                self.failure_since = now
+                self.state = "PROBATION"
+        elif hard_failure and self.latest is not None:
+            if self.failure_since is None:
+                self.failure_since = now
             self.state = (
                 "DEGRADED"
                 if now - self.failure_since >= config.degraded_after
                 else "PROBATION"
             )
-        elif not succeeded and self.latest is not None:
-            self.state = "DEGRADED"
-        else:
-            # A successful check means the proxy recovered. It is probationary
-            # until the rolling rate/streak/time criteria qualify it as stable;
-            # DEGRADED must describe the latest health result, not stick forever
-            # after any historical failure.
+        elif reachable and self.state != "STABLE":
+            # A slow response is a quality miss, not evidence that the proxy is
+            # dead. It may block initial admission but never causes DEGRADED.
             self.state = "PROBATION"
+        elif reachable:
+            # Once admitted, a reachable proxy retains STABLE through an
+            # isolated or sustained latency-quality miss.
+            pass
+        else:
+            self.state = "PROBATION"
+        if self.state == "STABLE":
+            self.was_stable = True
 
 
 def update_advertised(histories, entries, now, history_size):

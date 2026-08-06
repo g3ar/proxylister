@@ -23,3 +23,11 @@ def database_path() -> Path:
 
 def lock_path() -> Path:
     return tool_home() / "proxytools.lock"
+
+
+def geoip_database_path() -> Path:
+    return tool_home() / "proxytools-geoip.mmdb"
+
+
+def geoip_version_path() -> Path:
+    return tool_home() / "proxytools-geoip.version"

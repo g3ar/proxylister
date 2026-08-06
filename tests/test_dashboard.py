@@ -9,6 +9,16 @@ from proxytools.stability import StabilityConfig, StabilityPolicy
 
 
 class DashboardTests(unittest.IsolatedAsyncioTestCase):
+    def test_diagnostics_columns_require_debug_mode(self):
+        normal = ProxyMonitorApp(None, autostart=False)
+        debug = ProxyMonitorApp(None, autostart=False, debug=True)
+
+        normal_labels = {label for label, _key in normal.columns}
+        debug_labels = {label for label, _key in debug.columns}
+        diagnostics = {"City", "Exit IP", "Blocked by"}
+        self.assertTrue(diagnostics.isdisjoint(normal_labels))
+        self.assertTrue(diagnostics <= debug_labels)
+
     async def test_snapshot_populates_table_and_details(self):
         engine = MonitorEngine(
             policy=StabilityPolicy(StabilityConfig()),
@@ -18,7 +28,7 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             refresh_interval=1,
             retention_time=60,
         )
-        app = ProxyMonitorApp(engine, autostart=False)
+        app = ProxyMonitorApp(engine, autostart=False, debug=True)
         row = MonitorRow(
             key=("http", "1.2.3.4:80"),
             state="PROBATION",

@@ -6,9 +6,10 @@ import time
 import requests
 
 from proxytools.http import session
+from proxytools.geoip import locate
 from proxytools.models import ProxyResult
 
-GEO_URL = "http://ip-api.com/json/?fields=status,country,city,lat,lon,query"
+GEO_URL = "http://ip-api.com/json/?fields=status,query"
 HTTPS_GEO_URL = "https://ipwho.is/"
 
 
@@ -37,22 +38,24 @@ def check_proxy(protocol: str, proxy: str, timeout: float = 5, samples: int = 1)
             return ProxyResult(protocol, proxy, False)
     if data is None:
         return ProxyResult(protocol, proxy, False)
+    exit_ip = data.get("query", "")
+    location = locate(exit_ip)
     return ProxyResult(
         protocol=protocol,
         proxy=proxy,
         ok=True,
         latency_ms=round(statistics.median(durations)),
-        country=data.get("country", "Unknown"),
-        lat=data.get("lat"),
-        lon=data.get("lon"),
-        city=data.get("city", "Unknown"),
-        exit_ip=data.get("query", ""),
-        http_exit_ip=data.get("query", ""),
+        country=location["country"],
+        lat=location["lat"],
+        lon=location["lon"],
+        city=location["city"],
+        exit_ip=exit_ip,
+        http_exit_ip=exit_ip,
     )
 
 
 def probe_https_route(result: ProxyResult, timeout: float) -> bool:
-    """Attach the HTTPS exit IP and its GeoIP data using one proxy request.
+    """Attach the browser-like HTTPS exit IP and local GeoIP data.
 
     Failure is diagnostic-only: the configured browser URL remains the source
     of truth for target availability, so an outage of this metadata provider
@@ -70,10 +73,11 @@ def probe_https_route(result: ProxyResult, timeout: float) -> bool:
             if response.status_code != 200 or data.get("success") is False or not data.get("ip"):
                 return False
             result.exit_ip = data["ip"]
-            result.country = data.get("country", result.country)
-            result.city = data.get("city", result.city) or "Unknown"
-            result.lat = data.get("latitude", result.lat)
-            result.lon = data.get("longitude", result.lon)
+            location = locate(result.exit_ip)
+            result.country = location["country"]
+            result.city = location["city"]
+            result.lat = location["lat"]
+            result.lon = location["lon"]
             return True
         finally:
             response.close()

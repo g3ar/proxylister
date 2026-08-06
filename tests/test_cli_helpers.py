@@ -73,7 +73,12 @@ class CliHelperTests(unittest.TestCase):
         self.assertEqual(history.jitter, 7)
 
     def test_stable_failure_gets_grace_then_degrades_and_recovers(self):
-        config = StabilityConfig(min_checks=1, min_success_streak=1, min_alive_time=0)
+        config = StabilityConfig(
+            min_checks=1,
+            min_success_streak=1,
+            min_alive_time=0,
+            failure_tolerance=0,
+        )
         policy = StabilityPolicy(config)
         history = ProxyHistory("http", self.fast.proxy, config.history_size)
         history.record(self.fast, 100, policy)
@@ -89,24 +94,47 @@ class CliHelperTests(unittest.TestCase):
         history.record(ProxyResult("http", self.fast.proxy, False), 170, policy)
         self.assertEqual(history.state, "DEGRADED")
         history.record(self.fast, 180, policy)
-        self.assertEqual(history.state, "PROBATION")
+        self.assertEqual(history.state, "STABLE")
         self.assertEqual(history.consecutive_successes, 1)
         self.assertIsNone(history.failure_since)
 
-    def test_failure_tolerance_preserves_alive_origin(self):
+    def test_default_failure_tolerance_resets_alive_on_third_failure(self):
         config = StabilityConfig(
             min_checks=1,
             min_success_streak=1,
             min_alive_time=0,
-            failure_tolerance=1,
         )
         policy = StabilityPolicy(config)
         history = ProxyHistory("http", self.fast.proxy, config.history_size)
         history.record(self.fast, 100, policy)
         history.record(ProxyResult("http", self.fast.proxy, False), 110, policy)
         self.assertEqual(history.alive_since, 100)
+        self.assertEqual(history.state, "STABLE")
         history.record(ProxyResult("http", self.fast.proxy, False), 120, policy)
+        self.assertEqual(history.alive_since, 100)
+        self.assertEqual(history.state, "STABLE")
+        history.record(ProxyResult("http", self.fast.proxy, False), 130, policy)
         self.assertIsNone(history.alive_since)
+        self.assertEqual(history.state, "PROBATION")
+        self.assertEqual(history.failure_since, 130)
+        history.record(ProxyResult("http", self.fast.proxy, False), 189, policy)
+        self.assertEqual(history.state, "PROBATION")
+        history.record(ProxyResult("http", self.fast.proxy, False), 190, policy)
+        self.assertEqual(history.state, "DEGRADED")
+        history.record(self.fast, 200, policy)
+        self.assertEqual(history.state, "STABLE")
+
+    def test_slow_response_does_not_demote_stable_proxy(self):
+        config = StabilityConfig(min_checks=1, min_success_streak=1, min_alive_time=0)
+        policy = StabilityPolicy(config)
+        history = ProxyHistory("http", self.fast.proxy, config.history_size)
+        history.record(self.fast, 100, policy)
+
+        history.record(ProxyResult("http", self.fast.proxy, True, 800), 110, policy)
+
+        self.assertEqual(history.state, "STABLE")
+        self.assertEqual(history.consecutive_failures, 0)
+        self.assertIsNone(history.failure_since)
 
     def test_duration_format(self):
         self.assertEqual(format_duration(65), "01:05")

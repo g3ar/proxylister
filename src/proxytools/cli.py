@@ -21,6 +21,9 @@ Commands:
   monitor    Monitor proxies until they meet stability criteria
   help       Show this help
 
+Options:
+  --clear    Remove local databases, environment, locks, and generated caches
+
 Run ./proxytools <command> --help for command-specific options.""",
         file=stream,
     )
@@ -34,6 +37,10 @@ def main(argv=None):
     if args[0] == "--version":
         print(__version__)
         return 0
+    if args[0] == "--clear":
+        from proxytools.cleanup import main as clear
+
+        return clear()
     command = args.pop(0)
     module_name = COMMANDS.get(command)
     if module_name is None:
@@ -51,6 +58,15 @@ def main(argv=None):
 
     try:
         with ProcessLock(command):
+            from proxytools.geoip import ATTRIBUTION, configure_geoip, ensure_geoip_database
+
+            print("Checking local GeoIP database…", file=sys.stderr)
+            geoip = ensure_geoip_database()
+            configure_geoip(geoip.path)
+            if geoip.updated:
+                print(f"Updated {geoip.path.name}. {ATTRIBUTION}", file=sys.stderr)
+            if geoip.warning:
+                print(f"proxytools: {geoip.warning}", file=sys.stderr)
             return module.main(args)
     except AlreadyRunning as error:
         print(f"proxytools: {error}", file=sys.stderr)

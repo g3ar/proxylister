@@ -3,13 +3,15 @@
 The monitor retains rolling measurements and classifies candidates as
 ``PROBATION``, ``STABLE``, or ``DEGRADED``. Stability requires continuous
 uptime plus configurable count, rate, streak, latency, and jitter thresholds.
+Browser-facing country and city data come from the monthly local DB-IP Lite
+database (IP Geolocation by DB-IP, https://db-ip.com), using the HTTPS exit IP
+observed through each proxy.
 
 Keyboard controls::
 
-    q  quit                 p  pause display (checks continue)
-    s  choose visible states
-    c  choose a country
-    r  force next cycle     b  open selected proxy in a private browser
+    q  quit                 s  choose visible states
+    p  choose protocols     c  choose a country
+    b  open selected proxy in a private browser
 
 Examples::
 
@@ -51,8 +53,8 @@ def build_parser(prog="proxytools monitor"):
     stability.add_argument("--min-success-rate", type=probability, default=0.8, help="Required success ratio (0-1)")
     stability.add_argument("--min-success-streak", type=positive_int, default=3, help="Consecutive successes required")
     stability.add_argument("--min-alive-time", type=nonnegative_float, default=60, help="Continuous live seconds required")
-    stability.add_argument("--max-jitter", type=nonnegative_float, default=150, help="Maximum latency deviation in ms")
-    stability.add_argument("--alive-failure-tolerance", type=nonnegative_int, default=0, help="Failures allowed before alive time resets")
+    stability.add_argument("--max-jitter", type=nonnegative_float, default=500, help="Maximum latency deviation in ms")
+    stability.add_argument("--alive-failure-tolerance", type=nonnegative_int, default=2, help="Consecutive failures allowed before alive time resets")
     stability.add_argument(
         "--degraded-after", type=nonnegative_float, default=60,
         help="Failed seconds allowed after STABLE before DEGRADED",
@@ -61,6 +63,10 @@ def build_parser(prog="proxytools monitor"):
 
     display = parser.add_argument_group("display")
     display.add_argument("--stable-only", action="store_true", help="Initially show only stable proxies")
+    display.add_argument(
+        "--debug", action="store_true",
+        help="Show City, Exit IP, Blocked by, and route diagnostics",
+    )
     browser = parser.add_argument_group("browser")
     browser.add_argument(
         "--browser", choices=("auto", "chrome", "firefox"), default="auto",
@@ -125,6 +131,7 @@ def main(argv=None):
         ProxyMonitorApp(
             engine_from_args(args, repository),
             stable_only=args.stable_only,
+            debug=args.debug,
             browser=args.browser,
             browser_url=args.browser_url or "about:blank",
         ).run()
