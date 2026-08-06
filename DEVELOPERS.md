@@ -237,6 +237,11 @@ Alive, and Connection. Detailed proxy analytics belong in the `Enter` modal,
 not additional permanent columns or a separate debug mode. The `y` action uses
 Textual's OSC 52 support; do not add platform clipboard dependencies.
 
+The normal status area shows only the current user-facing activity. Internal
+cycle, tracked, stable, and visible counters remain available in snapshots but
+do not belong in the TUI. A second status line lists only filters that differ
+from the default states, protocols, and country selection.
+
 `q` and `Ctrl+C` deliberately call the same graceful shutdown action. Do not
 restore Textual's default `Ctrl+C` help behavior or exit the app before engine
 workers finish. At shutdown, the engine first cancels queued futures, then

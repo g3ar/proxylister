@@ -62,6 +62,8 @@ class ProxyMonitorApp(App):
         ("Alive", "alive"),
         ("Connection", "connection"),
     )
+    DEFAULT_STATES = frozenset({"STABLE", "PROBATION"})
+    DEFAULT_PROTOCOLS = frozenset({"http", "socks4", "socks5"})
 
     def __init__(
         self, engine: MonitorEngine, *, stable_only=False, autostart=True,
@@ -143,7 +145,7 @@ class ProxyMonitorApp(App):
         # Rewriting thousands of table cells once a second starves keyboard
         # events, so keep the table frozen until a proxy is checked again.
         if snapshot.phase == "waiting" and self.completed_cycle == snapshot.cycle:
-            self._render_status(snapshot, len(self.rows_by_key))
+            self._render_status(snapshot)
             return
         if (
             snapshot.incremental
@@ -180,7 +182,7 @@ class ProxyMonitorApp(App):
                         table.update_cell(key, column_key, value, update_width=False)
             self.rows_by_key[key] = row
             self.cells_by_key[key] = cells
-        self._render_status(snapshot, len(self.rows_by_key))
+        self._render_status(snapshot)
         if snapshot.resort:
             table.sort("state", "median", key=self._monitor_sort_key)
             if selected_key in self.rows_by_key:
@@ -230,33 +232,45 @@ class ProxyMonitorApp(App):
             self.completed_cycle = snapshot.cycle
             if selected_key in self.rows_by_key:
                 table.move_cursor(row=table.get_row_index(selected_key), animate=False)
-        self._render_status(snapshot, len(rows))
+        self._render_status(snapshot)
 
-    def _render_status(self, snapshot: MonitorSnapshot, visible: int):
-        running = (
-            f"Checking {snapshot.active_checked + snapshot.discovery_checked}/"
-            f"{snapshot.active_total + snapshot.discovery_total}"
-        )
+    def _render_status(self, snapshot: MonitorSnapshot):
+        checked = snapshot.active_checked + snapshot.discovery_checked
+        total = snapshot.active_total + snapshot.discovery_total
+        running = f"Checking proxies {checked}/{total}" if total else "Starting checks…"
         phase = {
             "running": running,
-            "restoring": f"Rechecking saved proxies {snapshot.checked}/{snapshot.total}",
-            "fetching": "Fetching ProxyScrape lists…",
-            "checking_new": f"Checking new proxies {snapshot.checked}/{snapshot.total}",
-            "checking": f"Checking {snapshot.checked}/{snapshot.total}",
-            "waiting": f"Next cycle in {snapshot.next_cycle_in}s",
-        }.get(snapshot.phase, snapshot.phase.title())
-        state_order = ("STABLE", "PROBATION", "DEGRADED")
-        selected = [state.lower() for state in state_order if state in self.selected_states]
-        filters = [f"states: {'+'.join(selected) or 'none'}"]
-        filters.append(f"protocols: {'+'.join(sorted(self.selected_protocols)) or 'none'}")
+            "restoring": "Loading saved proxies…",
+            "fetching": "Finding new proxies…",
+            "checking_new": f"Checking proxies {snapshot.checked}/{snapshot.total}",
+            "checking": f"Checking proxies {snapshot.checked}/{snapshot.total}",
+            "waiting": f"Next check in {snapshot.next_cycle_in}s",
+        }.get(snapshot.phase, snapshot.phase.replace("_", " ").capitalize())
+        filters = self._active_filter_labels()
+        text = phase if not filters else f"{phase}\nFilters │ {' │ '.join(filters)}"
+        self.query_one("#status", Static).update(text)
+
+    def _active_filter_labels(self):
+        filters = []
+        states = frozenset(self.selected_states)
+        if states != self.DEFAULT_STATES:
+            state_order = ("STABLE", "PROBATION", "DEGRADED")
+            selected = [state.lower() for state in state_order if state in states]
+            if states == frozenset({"STABLE", "PROBATION", "DEGRADED"}):
+                filters.append("including degraded")
+            elif len(selected) == 1:
+                filters.append(f"{selected[0]} only")
+            else:
+                filters.append(" + ".join(selected) if selected else "no states")
+
+        protocols = frozenset(self.selected_protocols)
+        if protocols != self.DEFAULT_PROTOCOLS:
+            order = ("http", "socks4", "socks5")
+            selected = [protocol.upper() for protocol in order if protocol in protocols]
+            filters.append(" + ".join(selected) if selected else "no protocols")
         if self.country_filter:
-            filters.append(f"country: {self.country_filter}")
-        text = (
-            f"Cycle {snapshot.cycle} │ {phase} │ {snapshot.stable_count} stable │ "
-            f"{snapshot.tracked_count} tracked │ {visible} visible │ {', '.join(filters)}"
-        )
-        status = self.query_one("#status", Static)
-        status.update(text)
+            filters.append(self.country_filter)
+        return filters
 
     def _details_text(self, row: MonitorRow):
         blocked = ", ".join(row.blockers) or "none"
@@ -381,7 +395,7 @@ class ProxyMonitorApp(App):
         self.filter_rebuilding = False
         snapshot = self.filter_pending_snapshot or self.latest_snapshot
         self.filter_pending_snapshot = None
-        self._render_status(snapshot, len(self.rows_by_key))
+        self._render_status(snapshot)
 
     def action_browser(self):
         if self.browser_process is not None and self.browser_process.poll() is None:

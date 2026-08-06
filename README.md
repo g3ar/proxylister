@@ -136,7 +136,7 @@ Rows are grouped by state and then ordered by latency:
 
 Rows remain in place while checks are completing and are reordered at controlled pass boundaries. This keeps the selected row from jumping while you navigate the table.
 
-The status line reports the current cycle and activity, how many proxies are stable or tracked, how many rows are visible, and which filters are active. During shutdown it is replaced with a clear stopping message.
+The status area reports only what the monitor is doing, such as loading saved proxies, checking the current batch, or waiting for the next check. A second line appears only when filters differ from their defaults. Internal cycle and candidate counters are deliberately omitted because the table already shows the user-facing result.
 
 ### Monitor access to one specific website
 

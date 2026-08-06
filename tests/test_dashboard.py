@@ -20,7 +20,7 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             {"State", "Country", "Median", "Alive", "Connection"},
         )
 
-    async def test_normal_status_hides_backend_lane_details(self):
+    async def test_status_shows_activity_and_only_nondefault_filters(self):
         app = ProxyMonitorApp(Mock(), autostart=False)
         snapshot = MonitorSnapshot(
             3, 3, 10, 2, 8, "running", None, (),
@@ -32,9 +32,19 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             app.receive_snapshot(snapshot)
             await pilot.pause()
             status = str(app.query_one("#status", Static).content)
-            self.assertIn("Checking 3/10", status)
-            self.assertNotIn("Active", status)
-            self.assertNotIn("Discovery", status)
+            self.assertEqual(status, "Checking proxies 3/10")
+            for backend_detail in ("Cycle", "stable", "tracked", "visible"):
+                self.assertNotIn(backend_detail, status)
+
+            app.selected_states.add("DEGRADED")
+            app.selected_protocols = {"socks5"}
+            app.country_filter = "France"
+            app._render_status(snapshot)
+            self.assertEqual(
+                str(app.query_one("#status", Static).content),
+                "Checking proxies 3/10\n"
+                "Filters │ including degraded │ SOCKS5 │ France",
+            )
 
     async def test_f1_opens_shared_about_information(self):
         app = ProxyMonitorApp(Mock(), autostart=False)
@@ -106,7 +116,9 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             app.receive_snapshot(snapshot)
             await pilot.pause()
             self.assertEqual(app.query_one(DataTable).row_count, 1)
-            self.assertIn("Checking 4/10", str(app.query_one("#status", Static).content))
+            self.assertIn(
+                "Checking proxies 4/10", str(app.query_one("#status", Static).content)
+            )
             await pilot.press("enter")
             self.assertIsInstance(app.screen, ProxyDetailsScreen)
             details = str(app.screen.query_one("#proxy-details", Static).content)
