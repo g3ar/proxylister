@@ -9,7 +9,7 @@ from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import DataTable, Footer, Static
+from textual.widgets import DataTable, Static
 
 from proxytools.about import format_about
 from proxytools.browser import BrowserUnavailable, launch_browser_session
@@ -21,6 +21,7 @@ from proxytools.output.dashboard_widgets import (
     ProxyDetailsScreen,
     ProtocolFilterScreen,
     ProtocolSelectionList,
+    ShortcutFooter,
     StateFilterScreen,
     StateSelectionList,
     format_duration,
@@ -42,6 +43,10 @@ class ProxyMonitorApp(App):
     }
     #table {
         height: 1fr;
+    }
+    #shortcuts {
+        height: 1;
+        background: #262626;
     }
     """
     BINDINGS = [
@@ -93,7 +98,7 @@ class ProxyMonitorApp(App):
     def compose(self) -> ComposeResult:
         yield Static("Starting monitor…", id="status")
         yield MonitorDataTable(id="table", cursor_type="row", zebra_stripes=True)
-        yield Footer()
+        yield ShortcutFooter(id="shortcuts")
 
     def on_mount(self):
         table = self.query_one("#table", DataTable)

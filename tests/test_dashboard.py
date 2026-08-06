@@ -7,7 +7,12 @@ from textual.widgets import DataTable, SelectionList, Static
 from proxytools.about import format_about
 from proxytools.monitoring import MonitorEngine, MonitorRow, MonitorSnapshot
 from proxytools.output.dashboard import ProxyMonitorApp
-from proxytools.output.dashboard_widgets import AboutScreen, ProtocolSelectionList, ProxyDetailsScreen
+from proxytools.output.dashboard_widgets import (
+    AboutScreen,
+    ProtocolSelectionList,
+    ProxyDetailsScreen,
+    ShortcutFooter,
+)
 from proxytools.stability import StabilityConfig, StabilityPolicy
 
 
@@ -19,6 +24,31 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             {label for label, _key in app.columns},
             {"State", "Country", "Median", "Alive", "Connection"},
         )
+
+    def test_shortcut_footer_keeps_essential_actions_on_narrow_screens(self):
+        self.assertEqual(
+            ShortcutFooter.visible_shortcuts(20),
+            (("S", "States"), ("Q", "Quit")),
+        )
+        narrow = ShortcutFooter.visible_shortcuts(45)
+        self.assertIn(("Q", "Quit"), narrow)
+        self.assertIn(("Enter", "Details"), narrow)
+        self.assertNotIn(("F1", "About"), narrow)
+        self.assertEqual(
+            ShortcutFooter.visible_shortcuts(200),
+            tuple((key, label) for key, label, _priority in ShortcutFooter.SHORTCUTS),
+        )
+
+    async def test_monitor_uses_custom_shortcut_footer(self):
+        app = ProxyMonitorApp(Mock(), autostart=False)
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            footer = app.query_one("#shortcuts", ShortcutFooter)
+            rendered = footer.render().plain
+            self.assertIn("Enter", rendered)
+            self.assertIn("Q", rendered)
+            self.assertEqual(len(rendered), footer.size.width)
 
     async def test_status_shows_activity_and_only_nondefault_filters(self):
         app = ProxyMonitorApp(Mock(), autostart=False)

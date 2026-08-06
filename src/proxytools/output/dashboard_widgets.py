@@ -7,6 +7,7 @@ here makes UI behavior independently testable and keeps ``dashboard.py``
 focused on translating monitor snapshots into visible rows.
 """
 
+from rich.text import Text
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.screen import ModalScreen
@@ -19,6 +20,57 @@ def format_duration(seconds: float) -> str:
     hours, remainder = divmod(total, 3600)
     minutes, secs = divmod(remainder, 60)
     return f"{hours:02d}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:02d}:{secs:02d}"
+
+
+class ShortcutFooter(Static):
+    """Compact mc-style help bar with predictable narrow-screen behavior."""
+
+    SHORTCUTS = (
+        ("F1", "About", 8),
+        ("Enter", "Details", 2),
+        ("S", "States", 3),
+        ("P", "Protocols", 4),
+        ("C", "Country", 5),
+        ("B", "Browser", 7),
+        ("Y", "Copy", 6),
+        ("Q", "Quit", 1),
+    )
+    KEY_STYLE = "bold white on #005f87"
+    LABEL_STYLE = "#d7d7d7 on #262626"
+
+    @classmethod
+    def visible_shortcuts(cls, width: int):
+        selected = []
+        used = 0
+        for shortcut in sorted(cls.SHORTCUTS, key=lambda item: item[2]):
+            key, label, _priority = shortcut
+            shortcut_width = len(key) + len(label) + 3
+            separator_width = 1 if selected else 0
+            if used + separator_width + shortcut_width <= width:
+                selected.append(shortcut)
+                used += separator_width + shortcut_width
+        selected_set = {(key, label) for key, label, _priority in selected}
+        return tuple(
+            (key, label) for key, label, _priority in cls.SHORTCUTS
+            if (key, label) in selected_set
+        )
+
+    def render(self):
+        footer = Text(style=self.LABEL_STYLE)
+        shortcuts = self.visible_shortcuts(self.size.width)
+        content_width = sum(len(key) + len(label) + 3 for key, label in shortcuts)
+        gap_count = max(0, len(shortcuts) - 1)
+        free_width = max(0, self.size.width - content_width)
+        gap_width, wider_gaps = divmod(free_width, gap_count) if gap_count else (0, 0)
+        for index, (key, label) in enumerate(shortcuts):
+            if index:
+                footer.append(
+                    " " * (gap_width + (1 if index <= wider_gaps else 0)),
+                    style=self.LABEL_STYLE,
+                )
+            footer.append(f" {key} ", style=self.KEY_STYLE)
+            footer.append(f" {label}", style=self.LABEL_STYLE)
+        return footer
 
 
 class MonitorDataTable(DataTable):
