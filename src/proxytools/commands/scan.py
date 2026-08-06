@@ -16,22 +16,14 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import os
-from urllib.parse import urlparse
 
 from proxytools.checking import check_proxy
 from proxytools.checking.browser import MIN_PAGE_LOAD_TIMEOUT, browser_check
-from proxytools.config import positive_float, sample_count, worker_count
+from proxytools.config import positive_float, sample_count, web_url, worker_count
 from proxytools.models import ProxyResult
 from proxytools.output.console import console, progress_display
 from proxytools.output.serializers import filter_and_sort, write_results
 from proxytools.sources.proxyscrape import fetch_all_proxies
-
-
-def web_url(value: str) -> str:
-    parsed = urlparse(value)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise argparse.ArgumentTypeError("must be an absolute http:// or https:// URL")
-    return value
 
 
 def build_parser(prog="proxytools scan"):

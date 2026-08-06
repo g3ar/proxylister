@@ -1,8 +1,17 @@
 """Reusable argparse value validators and application limits."""
 
 import argparse
+from urllib.parse import urlparse
 
 MAX_WORKERS = 100
+
+
+def web_url(value: str) -> str:
+    """Accept only absolute HTTP(S) URLs suitable for network health checks."""
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise argparse.ArgumentTypeError("must be an absolute http:// or https:// URL")
+    return value
 
 
 def positive_float(value: str) -> float:

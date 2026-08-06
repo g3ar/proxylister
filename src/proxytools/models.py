@@ -15,10 +15,13 @@ class ProxyResult:
     lat: float | None = None
     lon: float | None = None
     checked_at: str = ""
+    failure_reason: str = ""
 
     @property
     def key(self) -> tuple[str, str]:
         return self.protocol, self.proxy
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        record = asdict(self)
+        record.pop("failure_reason", None)
+        return record

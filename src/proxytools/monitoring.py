@@ -8,7 +8,7 @@ import threading
 import time
 from typing import Callable
 
-from proxytools.checking import check_proxy, connection_string
+from proxytools.checking import check_proxy, check_url, connection_string
 from proxytools.sources.proxyscrape import fetch_all_proxies
 from proxytools.stability import StabilityPolicy
 from proxytools.stability.history import expire_histories, update_advertised
@@ -64,6 +64,7 @@ class MonitorEngine:
         fetcher=fetch_all_proxies,
         checker=check_proxy,
         repository=None,
+        target_url=None,
     ):
         self.policy = policy
         self.workers = workers
@@ -74,6 +75,7 @@ class MonitorEngine:
         self.fetcher = fetcher
         self.checker = checker
         self.repository = repository
+        self.target_url = target_url
         self.continuity_tolerance = 2 * refresh_interval
         self.histories = (
             repository.load_histories(policy, retention_time, self.continuity_tolerance)
@@ -182,7 +184,7 @@ class MonitorEngine:
         publish(self.snapshot(checked, len(candidates), phase))
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=self.workers)
         pending = {
-            executor.submit(self.checker, protocol, proxy, self.timeout, self.samples)
+            executor.submit(self._check_candidate, protocol, proxy)
             for protocol, proxy in candidates
         }
         try:
@@ -208,6 +210,14 @@ class MonitorEngine:
             executor.shutdown(wait=stop.is_set(), cancel_futures=True)
         self._flush()
         return checked
+
+    def _check_candidate(self, protocol, proxy):
+        """Run the normal proxy check and optional lightweight target request."""
+        result = self.checker(protocol, proxy, self.timeout, self.samples)
+        if result.ok and self.target_url and not check_url(result, self.target_url, self.timeout):
+            result.ok = False
+            result.failure_reason = "url"
+        return result
 
     def _record_result(self, history, result):
         checked_mono = time.monotonic()

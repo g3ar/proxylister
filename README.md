@@ -103,12 +103,14 @@ At startup, saved proxies and their last known statuses are loaded before any Pr
 | `--retention-time` | Continue tracking proxies absent from ProxyScrape for this many seconds | `1800` |
 | `--stable-only` | Hide probation and degraded proxies | off |
 | `--browser` | Browser for the `b` action: `auto`, `chrome`, or `firefox` | `auto` |
-| `--browser-url` | Initial page opened in a disposable browser session | `about:blank` |
+| `--browser-url` | HTTP(S) URL every proxy must reach; also opened by `b` | disabled (`b` opens `about:blank`) |
 | `--reset-history` | Delete this clone's saved history before starting | off |
 
 **Controls:** arrow keys select and scroll rows, `q` quits, `p` pauses/resumes display updates (checks continue), `s` toggles stable-only mode, `c` opens a case-insensitive country filter, `r` requests the next scan immediately, and `b` opens the selected proxy in a disposable private browser session. Submit an empty country filter to show every country again. Textual's footer always shows the active bindings.
 
-The browser action detects Chrome/Chromium first and Firefox second when `--browser auto` is used. Chrome runs with incognito mode and a temporary user-data directory; Firefox runs in private mode with a generated temporary profile. Both receive the selected HTTP, SOCKS4, or SOCKS5 proxy without reading or changing the normal browser profile. Only one browser session can be launched by a monitor at a time. The browser may outlive the monitor; its detached lifecycle helper removes the temporary profile after the browser closes. Selenium is not used for interactive browser sessions.
+The browser action detects Chrome/Chromium first and Firefox second when `--browser auto` is used. Chrome runs with incognito mode and a temporary user-data directory; Firefox runs in private mode with a generated temporary profile. Both receive the selected HTTP, SOCKS4, or SOCKS5 proxy without reading or changing the normal browser profile. Only one browser session can be launched by a monitor at a time. The browser may outlive the monitor; its detached lifecycle helper removes the temporary profile after the browser closes.
+
+When `--browser-url` is supplied, every otherwise successful proxy check makes one additional lightweight `requests` request to that URL through the same proxy. HTTP 2xx/3xx passes; HTTP 4xx/5xx, timeout, TLS, proxy, and redirect errors fail with the `url` blocker. This happens once after the configured proxy samples, uses `--timeout`, and never invokes Selenium. Without the option there is no target request and `b` opens `about:blank`.
 
 The Textual table is scrollable, supports row selection, and updates a detail panel for the highlighted proxy. It shows state, continuous live time, total observed uptime, first seen and last failure times, check count, success streak, rolling success rate, median latency, p95 latency, jitter, blocking criteria, and connection string. `Blocked by` explains why a row is not yet stable: `alive`, `checks`, `rate`, `streak`, `latency`, `jitter`, or `failed`. A status bar reports the current phase, cycle progress, tracked/stable counts, active filter, and countdown to the next cycle. A proxy that disappears from ProxyScrape continues to be checked until `--retention-time` expires.
 

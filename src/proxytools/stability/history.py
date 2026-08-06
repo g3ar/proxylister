@@ -16,6 +16,7 @@ class CheckSample:
     checked_at: float
     ok: bool
     latency_ms: int | None
+    failure_reason: str = ""
 
 
 @dataclass(slots=True)
@@ -75,7 +76,12 @@ class ProxyHistory:
         self.restored = False
         config = policy.config
         succeeded = result.ok and result.latency_ms is not None and result.latency_ms < config.max_latency
-        self.samples.append(CheckSample(now, succeeded, result.latency_ms if succeeded else None))
+        failure_reason = ""
+        if not succeeded:
+            failure_reason = result.failure_reason or ("failed" if not result.ok else "latency")
+        self.samples.append(
+            CheckSample(now, succeeded, result.latency_ms if succeeded else None, failure_reason)
+        )
         if succeeded:
             self.latest = result
             self.consecutive_successes += 1
@@ -83,6 +89,11 @@ class ProxyHistory:
             if self.alive_since is None:
                 self.alive_since = now
         else:
+            # A target-URL failure still proved that the proxy itself answered
+            # and produced geolocation data. Keep it visible in the dashboard,
+            # but classify the complete health check as degraded.
+            if result.failure_reason == "url":
+                self.latest = result
             self.consecutive_successes = 0
             self.consecutive_failures += 1
             self.stable_since = None

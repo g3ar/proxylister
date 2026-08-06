@@ -25,6 +25,7 @@ from proxytools.config import (
     positive_int,
     probability,
     sample_count,
+    web_url,
     worker_count,
 )
 from proxytools.monitoring import MonitorEngine
@@ -61,8 +62,8 @@ def build_parser(prog="proxytools monitor"):
         help="Browser used by the 'b' action (default: auto)",
     )
     browser.add_argument(
-        "--browser-url", default="about:blank",
-        help="Initial URL for disposable browser sessions",
+        "--browser-url", type=web_url,
+        help="URL that every proxy must reach via requests; also opened by 'b'",
     )
     persistence = parser.add_argument_group("persistence")
     persistence.add_argument(
@@ -103,6 +104,7 @@ def engine_from_args(args, repository=None):
         refresh_interval=args.refresh_interval,
         retention_time=args.retention_time,
         repository=repository,
+        target_url=args.browser_url,
     )
 
 
@@ -118,7 +120,7 @@ def main(argv=None):
             engine_from_args(args, repository),
             stable_only=args.stable_only,
             browser=args.browser,
-            browser_url=args.browser_url,
+            browser_url=args.browser_url or "about:blank",
         ).run()
     finally:
         repository.close()

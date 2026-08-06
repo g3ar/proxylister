@@ -1,5 +1,6 @@
 import threading
 import unittest
+from unittest.mock import patch
 
 from proxytools.models import ProxyResult
 from proxytools.monitoring import MonitorEngine
@@ -76,6 +77,43 @@ class MonitorEngineTests(unittest.TestCase):
         )
         self.assertLess(phases.index("restoring"), phases.index("fetching"))
         self.assertLess(phases.index("fetching"), phases.index("checking_new"))
+
+    def test_browser_url_is_checked_with_requests_after_proxy_succeeds(self):
+        engine = MonitorEngine(
+            policy=StabilityPolicy(StabilityConfig()), workers=1, timeout=3, samples=2,
+            refresh_interval=1, retention_time=60, target_url="https://example.com",
+            checker=lambda *args: ProxyResult("http", "1.2.3.4:80", True, 50, "France"),
+        )
+        with patch("proxytools.monitoring.check_url", return_value=True) as target_check:
+            result = engine._check_candidate("http", "1.2.3.4:80")
+        self.assertTrue(result.ok)
+        target_check.assert_called_once_with(result, "https://example.com", 3)
+
+    def test_failed_browser_url_marks_complete_check_as_url_failure(self):
+        engine = MonitorEngine(
+            policy=StabilityPolicy(StabilityConfig()), workers=1, timeout=3, samples=1,
+            refresh_interval=1, retention_time=60, target_url="https://example.com",
+            checker=lambda *args: ProxyResult("http", "1.2.3.4:80", True, 50, "France"),
+        )
+        with patch("proxytools.monitoring.check_url", return_value=False):
+            result = engine._check_candidate("http", "1.2.3.4:80")
+        history = ProxyHistory("http", result.proxy, 10)
+        history.record(result, 100, engine.policy)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.failure_reason, "url")
+        self.assertEqual(history.state, "DEGRADED")
+        self.assertEqual(engine.policy.blockers(history, 100)[0], "url")
+
+    def test_browser_url_is_skipped_when_base_proxy_check_fails(self):
+        engine = MonitorEngine(
+            policy=StabilityPolicy(StabilityConfig()), workers=1, timeout=3, samples=1,
+            refresh_interval=1, retention_time=60, target_url="https://example.com",
+            checker=lambda *args: ProxyResult("http", "1.2.3.4:80", False),
+        )
+        with patch("proxytools.monitoring.check_url") as target_check:
+            result = engine._check_candidate("http", "1.2.3.4:80")
+        self.assertFalse(result.ok)
+        target_check.assert_not_called()
 
 
 if __name__ == "__main__":
