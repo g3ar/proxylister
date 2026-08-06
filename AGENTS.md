@@ -29,6 +29,34 @@ a Textual terminal UI until they qualify as stable. Selenium is installed with
 the project but used only for explicit browser validation or an interactive
 disposable browser session.
 
+## Design principle: KISS
+
+Follow KISS ("Keep It Simple, Stupid") wherever doing so does not compromise
+correctness, safety, or the agreed user experience. Prefer the smallest design
+that completely solves the current problem and remains easy to explain,
+operate, test, and remove.
+
+In practice:
+
+- do not add modes, CLI flags, configuration keys, abstractions, background
+  services, dependencies, or infrastructure for hypothetical future needs;
+- keep one authoritative representation of each concept: one entrypoint, one
+  dependency manifest, one configuration model, and one explicit state model;
+- prefer straightforward code and data flow over clever indirection;
+- reuse an existing mechanism when it already expresses the requirement
+  clearly, but do not force unrelated meanings into one field or flag;
+- separate components only where the boundary materially improves correctness,
+  testability, responsiveness, or platform support;
+- optimize after observing a real problem and measuring or reproducing it;
+- remove obsolete options, compatibility paths, and dead code once they are no
+  longer required and removal is safe;
+- document unavoidable complexity and the concrete reason it exists.
+
+KISS does not mean hiding errors, weakening validation, collapsing distinct
+semantics such as `reachable` and `accepted`, or implementing a quick patch that
+creates ambiguous behavior. Simplicity is judged across the whole user and
+maintenance workflow, not merely by the number of lines changed.
+
 ## Supported user interface
 
 There is one root entrypoint:
