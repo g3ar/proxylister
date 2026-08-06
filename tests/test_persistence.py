@@ -168,6 +168,39 @@ class PersistenceTests(unittest.TestCase):
         self.assertTrue(history.restored)
         self.assertIsNone(history.alive_since)
 
+    def test_restored_stable_with_slow_median_is_normalized_to_probation(self):
+        slow = ProxyResult("http", "1.2.3.4:80", True, 800, "France")
+        self.repository.save_checks(
+            [CheckObservation(slow, 100, False, "STABLE", "STABLE", was_stable=True)],
+            20,
+        )
+
+        history = self.repository.load_histories(
+            self.policy, retention_time=1000, restart_tolerance=20,
+            now_wall=110, now_mono=500,
+        )[slow.key]
+
+        self.assertEqual(history.median_latency, 800)
+        self.assertEqual(history.state, "PROBATION")
+        self.assertTrue(history.was_stable)
+
+    def test_slow_probation_from_former_stable_is_retained(self):
+        fast = ProxyResult("http", "1.2.3.4:80", True, 42, "France")
+        slow = ProxyResult("http", fast.proxy, True, 800, "France")
+        self.repository.save_checks(
+            [CheckObservation(fast, 100, True, "PROBATION", "STABLE", was_stable=True)],
+            20,
+        )
+        self.repository.save_checks(
+            [CheckObservation(slow, 110, False, "STABLE", "PROBATION", was_stable=True)],
+            20,
+        )
+
+        stored = self.repository.connection.execute(
+            "SELECT current_state,was_stable FROM proxies"
+        ).fetchone()
+        self.assertEqual(stored, ("PROBATION", 1))
+
     def test_short_restart_gap_preserves_continuity(self):
         result = ProxyResult("http", "1.2.3.4:80", True, 42, "France")
         self.repository.save_checks(

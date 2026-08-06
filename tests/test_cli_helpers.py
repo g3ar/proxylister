@@ -108,17 +108,42 @@ class CliHelperTests(unittest.TestCase):
         history.record(self.fast, 200, policy)
         self.assertEqual(history.state, "STABLE")
 
-    def test_slow_response_does_not_demote_stable_proxy(self):
-        config = StabilityConfig(min_checks=1, min_success_streak=1, min_alive_time=0)
+    def test_one_slow_response_does_not_demote_stable_proxy(self):
+        config = StabilityConfig(
+            history_size=5, min_checks=1, min_success_streak=1, min_alive_time=0
+        )
         policy = StabilityPolicy(config)
         history = ProxyHistory("http", self.fast.proxy, config.history_size)
-        history.record(self.fast, 100, policy)
+        for now in range(100, 105):
+            history.record(self.fast, now, policy)
 
         history.record(ProxyResult("http", self.fast.proxy, True, 800), 110, policy)
 
         self.assertEqual(history.state, "STABLE")
         self.assertEqual(history.consecutive_failures, 0)
         self.assertIsNone(history.failure_since)
+
+    def test_sustained_slow_median_moves_stable_to_probation_until_recovery(self):
+        config = StabilityConfig(
+            history_size=5, min_checks=1, min_success_streak=1, min_alive_time=0
+        )
+        policy = StabilityPolicy(config)
+        history = ProxyHistory("http", self.fast.proxy, config.history_size)
+        for now in range(100, 105):
+            history.record(self.fast, now, policy)
+
+        for now in range(110, 113):
+            history.record(ProxyResult("http", self.fast.proxy, True, 800), now, policy)
+
+        self.assertEqual(history.median_latency, 800)
+        self.assertEqual(history.state, "PROBATION")
+        self.assertIsNone(history.failure_since)
+
+        for now in range(120, 123):
+            history.record(self.fast, now, policy)
+
+        self.assertEqual(history.median_latency, 50)
+        self.assertEqual(history.state, "STABLE")
 
     def test_url_failure_is_reachable_but_not_accepted(self):
         config = StabilityConfig(min_checks=1, min_success_streak=1, min_alive_time=0)

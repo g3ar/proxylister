@@ -220,7 +220,7 @@ A stable proxy retains its state through the configured number of hard failures.
 
 Continued hard failure for `MONITOR_DEGRADED_AFTER` produces `DEGRADED`. A previously stable proxy returns to `STABLE` after one complete accepted recovery check.
 
-A reachable but slow result is a quality miss. It can block initial stable admission but does not by itself demote an already stable proxy.
+A reachable but slow result is a quality miss, not evidence that the proxy is dead. One isolated slow sample does not demote an already stable proxy because the limit is evaluated against the rolling median. A sustained rolling median at or above `MAX_LATENCY` moves `STABLE` to `PROBATION`, never directly to `DEGRADED`; the proxy returns to `STABLE` when the rolling median is acceptable again. Persisted `STABLE` state is normalized by the same latency invariant during restoration.
 
 ### URL failures
 

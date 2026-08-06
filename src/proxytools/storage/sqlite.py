@@ -29,6 +29,7 @@ class CheckObservation:
     new_state: str
     reason: str = ""
     failure_since: float | None = None
+    was_stable: bool = False
 
 
 class StateRepository:
@@ -105,7 +106,8 @@ class StateRepository:
             for item in observations:
                 result = item.result
                 retained_failure = item.new_state == "STABLE" or (
-                    item.new_state == "PROBATION" and item.failure_since is not None
+                    item.new_state == "PROBATION"
+                    and (item.failure_since is not None or item.was_stable)
                 )
                 if (
                     item.new_state not in {"STABLE", "PROBATION"}
@@ -158,7 +160,8 @@ class StateRepository:
                      result.exit_ip, result.lat, result.lon,
                      item.checked_at, item.checked_at, item.checked_at, success_at, failure_at,
                      int(item.accepted), int(item.accepted), int(not item.accepted), uptime,
-                     item.new_state, item.failure_since, int(item.new_state == "STABLE")),
+                     item.new_state, item.failure_since,
+                     int(item.was_stable or item.new_state == "STABLE")),
                 )
                 proxy_id = self.connection.execute(
                     "SELECT id FROM proxies WHERE protocol=? AND address=?", result.key
@@ -302,6 +305,16 @@ class StateRepository:
             if failure_since is not None:
                 history.failure_since = now_mono - max(0, now_wall - failure_since)
             history.state = stored_state
+            if (
+                stored_state == "STABLE"
+                and (
+                    history.median_latency is None
+                    or history.median_latency >= policy.config.max_latency
+                )
+            ):
+                # A persisted label must not bypass the current STABLE latency
+                # invariant, including after MAX_LATENCY was changed.
+                history.state = "PROBATION"
             history.was_stable = bool(
                 history.was_stable or was_stable or stored_state == "STABLE"
             )

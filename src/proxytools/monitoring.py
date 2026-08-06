@@ -302,6 +302,7 @@ class MonitorEngine:
             and (
                 history.restored
                 or history.failure_since is not None
+                or history.was_stable
                 or (history.samples and history.samples[-1].accepted)
             )
         )
@@ -349,7 +350,7 @@ class MonitorEngine:
             self._pending_observations.append(
                 CheckObservation(
                     result, checked_wall, accepted, old_state, history.state,
-                    reason, failure_since,
+                    reason, failure_since, history.was_stable,
                 )
             )
             if len(self._pending_observations) >= 100:

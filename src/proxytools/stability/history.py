@@ -96,6 +96,11 @@ class ProxyHistory:
         self.samples.append(
             CheckSample(now, reachable, accepted, result.latency_ms, failure_reason)
         )
+        latency_miss = (
+            reachable
+            and self.median_latency is not None
+            and self.median_latency >= config.max_latency
+        )
         if reachable:
             self.latest = result
         if hard_failure:
@@ -110,9 +115,10 @@ class ProxyHistory:
             self.failure_since = None
             self.consecutive_successes = self.consecutive_successes + 1 if accepted else 0
 
-        if accepted and recovering:
+        if accepted and recovering and not latency_miss:
             # A proxy that already earned STABLE only needs one clean recovery
-            # check; it need not repeat the full initial admission period.
+            # check once its rolling median is acceptable again; it need not
+            # repeat the full initial admission period.
             self.stable_since = now
             self.failure_since = None
             self.state = "STABLE"
@@ -133,6 +139,13 @@ class ProxyHistory:
                 if now - self.failure_since >= config.degraded_after
                 else "PROBATION"
             )
+        elif latency_miss and self.state == "STABLE":
+            # MAX_LATENCY is a STABLE invariant, evaluated against the rolling
+            # median so one isolated slow request does not cause state churn.
+            # The proxy is still reachable, so it never becomes DEGRADED for
+            # latency alone.
+            self.stable_since = None
+            self.state = "PROBATION"
         elif reachable and self.state != "STABLE":
             # A slow response is a quality miss, not evidence that the proxy is
             # dead. It may block initial admission but never causes DEGRADED.
