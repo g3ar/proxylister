@@ -329,7 +329,18 @@ document.
 
 Generated local build output lives under ignored `release/.work/`. Local dirty-
 worktree artifacts are for development only. A real release requires one clean,
-checksummed source snapshot and locked dependencies.
+checksummed source snapshot. Linux dependencies are locked in
+`release/linux/constraints.txt`; update that file only through an explicit,
+reviewed dependency refresh followed by a clean build and both smoke layers.
+
+`release/linux/build.sh` always runs deterministic offline frozen smoke tests.
+`release/linux/smoke-live.sh` is a separate bounded network check and must not
+be folded into the ordinary contributor build gate.
+
+Preserve `.work` after builds for diagnostics. `release/linux/build.sh` removes
+the previous ignored `release/bin/` at startup and promotes the complete latest
+artifact set there only after a successful build and offline smoke. Do not
+commit either directory or treat a dirty-worktree artifact as publishable.
 
 The PVE server is `root@192.168.66.2`; Linux template `9000` is stopped,
 protected, and immutable between explicit maintenance sessions. Never build in

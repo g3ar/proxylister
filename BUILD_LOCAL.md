@@ -18,31 +18,33 @@ From any directory inside the checkout, run:
 ```
 
 The script intentionally accepts a dirty worktree so packaging changes can be
-tested before commit. It removes only its previous
-`release/.work/local-linux/`, then:
+tested before commit. At startup it removes its previous
+`release/.work/local-linux/` and `release/bin/`, so an obsolete binary can never
+be mistaken for the result of the current attempt. It then:
 
 1. creates a fresh release-only Python virtual environment;
-2. installs the current project and pinned PyInstaller;
-3. runs the complete unit test suite;
-4. compiles all project Python modules and checks the POSIX scripts;
-5. builds the one-file executable from
+2. installs the current project and build tooling under the exact versions in
+   `release/linux/constraints.txt`;
+3. rejects any resolved package set that differs from those constraints;
+4. runs the complete unit test suite;
+5. compiles all project Python modules and checks the POSIX scripts;
+6. builds the one-file executable from
    `release/pyinstaller/proxytools.spec`;
-6. writes an environment and checksum manifest;
-7. invokes `release/linux/smoke.sh` against the built executable.
+7. writes an environment manifest and separate checksum file;
+8. invokes `release/linux/smoke.sh` against the built executable;
+9. only after success, promotes the complete artifact set to `release/bin/`.
 
 Network access to PyPI is required while the fresh environment is populated.
 The ordinary development `.venv` is neither read nor modified.
 
-## Outputs
+## Working data and final output
 
-Generated output is ignored by Git:
+Both locations are generated and ignored by Git. `.work` is intentionally
+retained after the build because its environment and logs are needed to
+diagnose failures:
 
 ```text
 release/.work/local-linux/
-  artifacts/
-    proxytools
-    README.md
-    MANIFEST.txt
   logs/
     build.log
     smoke.log
@@ -50,13 +52,34 @@ release/.work/local-linux/
   venv/
 ```
 
+During a failed attempt, partial or completed build output may also remain in
+`.work/local-linux/artifacts/` for diagnosis.
+
+After a successful build, the convenient manual-test copy is:
+
+```text
+release/bin/
+  proxytools
+  README.md
+  MANIFEST.txt
+  SHA256SUMS
+```
+
+`release/bin/` represents only the current successful attempt. The old
+directory is deleted before every build; after deterministic smoke tests pass,
+the completed artifact directory is moved there rather than duplicated. If a
+build fails, inspect `.work`; the absence of `release/bin/` is deliberate.
+
 The copied `README.md` is the project root document for end users. Build
 instructions do not belong in that file.
 
-`MANIFEST.txt` records the source commit, clean/dirty worktree state, build UTC
-time, operating system, glibc, Python, PyInstaller, and artifact checksums. An
-artifact whose manifest says `source_tree=dirty` is for development testing
-only.
+`MANIFEST.txt` records the artifact name, project version, source commit,
+clean/dirty worktree state, build UTC time, operating system, architecture,
+glibc, Python, pip, PyInstaller, and the constraints-file checksum.
+`SHA256SUMS` covers the executable, user `README.md`, and manifest. The binary
+itself reports its embedded application version through `./proxytools
+--version`; version and architecture do not belong in its filename. An artifact
+whose manifest says `source_tree=dirty` is for development testing only.
 
 The build script writes detailed output to `logs/build.log` and prints the
 artifact, manifest, and log paths after success. On failure, inspect the end of
@@ -70,24 +93,43 @@ runs it with an empty environment and no Python in `PATH`. It currently checks:
 - version and project information;
 - root, `list`, and `monitor` help;
 - inclusion of both dynamically imported command modules;
-- creation and preservation of external `proxytools.conf` beside the binary;
-- `--clear` without source-only `.venv` state;
-- absence of unexpected `proxydb/` and `geodb/` after help/cleanup checks;
+- creation and preservation of an edited external `proxytools.conf`;
+- refusal to clear state while a real kernel lock is held;
+- cleanup of generated `proxydb/` and `geodb/` state without source-only
+  `.venv` state;
 - a clear configuration error when the executable directory is not writable.
 
-These checks are offline and deterministic. Live proxy, GeoIP, browser, full
-monitor PTY, and concurrent-process checks remain future frozen smoke work.
+These checks are offline and deterministic. They run automatically after every
+successful build.
 
 To rerun smoke tests against an existing artifact without rebuilding:
 
 ```bash
 ./release/linux/smoke.sh \
-  release/.work/local-linux/artifacts/proxytools
+  release/bin/proxytools
 ```
 
-## Release limitation
+## Optional live smoke
 
-PyInstaller is pinned by the build script, but the full resolved Python
-dependency set is not locked yet. Therefore this workflow proves that the
-current source can be frozen and exercised locally; it is not yet the final
-reproducible release pipeline.
+Network-dependent checks are separate so an external outage cannot fail the
+deterministic build gate:
+
+```bash
+./release/linux/smoke-live.sh \
+  release/bin/proxytools
+```
+
+This bounded check downloads/opens the GeoIP database, completes a real `list`
+run, then starts `monitor` in a PTY and exits through its `q` action. Default
+timeouts are 300 seconds for `list` and 60 seconds for `monitor`; override them
+with `PROXYTOOLS_LIVE_LIST_TIMEOUT` and `PROXYTOOLS_LIVE_MONITOR_TIMEOUT`.
+
+The live test is diagnostic and release-maintainer-facing, not part of normal
+contributor iteration. Interactive browser validation remains manual because
+it requires a usable selected proxy and an installed external browser.
+
+## Remaining release limitation
+
+The local artifact contract and Linux dependency set are now fixed. This still
+is not the final release pipeline: publishable builds require a clean release
+worktree, and isolated remote orchestration is not implemented yet.

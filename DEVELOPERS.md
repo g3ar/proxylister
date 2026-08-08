@@ -65,6 +65,10 @@ test contract. The remote PVE lab is an additional release-maintainer isolation
 layer documented separately in `BUILD_REMOTE.md`; it is not part of the normal
 contributor loop.
 
+Local build diagnostics remain in `release/.work/`. After success, use the
+fresh artifact set in `release/bin/` for manual testing; the build script removes
+the previous `bin/` before every attempt so stale binaries do not accumulate.
+
 ## Mental model
 
 Both commands share startup, discovery, and lightweight proxy checking:

@@ -25,3 +25,4 @@ proxytools-geoip.version
 proxydb/
 geodb/
 release/.work/
+release/bin/

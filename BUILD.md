@@ -21,9 +21,10 @@ The remote lab is not a requirement for a code contribution or pull request.
 | Local Linux source tests | Implemented |
 | Local Linux one-file build | Implemented |
 | Local frozen smoke tests | Implemented |
+| Locked Linux build dependencies | Implemented |
+| Optional live Linux smoke tests | Implemented |
 | Debian 13 PVE template | Provisioned and validated |
 | Automated remote Linux build | Not implemented |
-| Frozen dependency lock | Not implemented |
 | Windows template and build | Deferred to a separate later stage |
 | Release publishing automation | Not implemented |
 
@@ -49,8 +50,13 @@ Each native build must:
 
 Generated environments, VM images, credentials, artifacts, and logs are local
 state and must never be committed. `pyproject.toml` remains the authoritative
-project manifest. A future release constraints file may pin resolved build
-inputs but must not become a second hand-maintained runtime manifest.
+project manifest. `release/linux/constraints.txt` pins the exact verified Linux
+build environment; it is build input, not a second end-user runtime manifest.
+
+Local build internals and diagnostic logs remain under `release/.work/`. The
+complete latest successful artifact set is promoted to ignored `release/bin/`
+for manual testing. Every new local build removes the previous `release/bin/`
+before starting, so it never exposes a stale binary as current output.
 
 The supported Linux binary baseline is current stable/LTS distributions. Older
 systems may use the source workflow documented in `README.md`.

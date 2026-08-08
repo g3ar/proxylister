@@ -137,8 +137,10 @@ cd /home/builder/proxytools
 A real release must not use a dirty-worktree rsync. Future orchestration must
 create one clean, checksummed source archive from the release worktree, upload
 it, verify it inside the clone, run the committed build script, retrieve the
-artifact, user `README.md`, manifest, and full logs, then independently verify
-returned checksums.
+`proxytools` artifact, user `README.md`, `MANIFEST.txt`, `SHA256SUMS`, and full
+logs, then independently verify returned checksums. The optional live smoke may
+run in the clone as a separate network-dependent release gate; it must remain
+distinct from the deterministic build result.
 
 ## Safe cleanup
 
