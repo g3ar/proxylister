@@ -361,6 +361,19 @@ immutable. It is for running the returned standalone artifact in a disposable
 linked clone, not for producing a second Linux build. Never boot or delete
 either base template directly.
 
+Root access to the PVE host is intentionally delegated for project build-lab
+work. Within an explicitly requested task, creating, configuring, starting,
+stopping, cloning, templating, and deleting project VMs on that host is already
+authorized and must not trigger repetitive permission questions. Proceed
+autonomously while retaining exact-VMID/name checks, bounded waits, template
+protection, and the cleanup guards in `BUILD_REMOTE.md`. Ask only when an action
+would affect the PVE host itself, unrelated workloads or data, credentials,
+network infrastructure, or otherwise materially expand beyond the requested
+project task. Also ask before a destructive action involving a template or a
+downloaded ISO/cloud image whenever the exact target, continued need, or safe
+recovery path is uncertain. Routine deletion of an exact disposable clone
+after successful validation remains pre-authorized.
+
 Do not start Windows packaging or provisioning until remote Linux orchestration
 is implemented and proven.
 
