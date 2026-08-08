@@ -364,15 +364,18 @@ either base template directly.
 Root access to the PVE host is intentionally delegated for project build-lab
 work. Within an explicitly requested task, creating, configuring, starting,
 stopping, cloning, templating, and deleting project VMs on that host is already
-authorized and must not trigger repetitive permission questions. Proceed
-autonomously while retaining exact-VMID/name checks, bounded waits, template
-protection, and the cleanup guards in `BUILD_REMOTE.md`. Ask only when an action
-would affect the PVE host itself, unrelated workloads or data, credentials,
-network infrastructure, or otherwise materially expand beyond the requested
-project task. Also ask before a destructive action involving a template or a
-downloaded ISO/cloud image whenever the exact target, continued need, or safe
-recovery path is uncertain. Routine deletion of an exact disposable clone
-after successful validation remains pre-authorized.
+authorized. This authorization includes all routine SSH commands, linked-clone
+lifecycle operations, source/artifact transfer, commands inside project guests,
+log retrieval, and deletion of exact disposable clones after successful work.
+Do not ask the user for permission at each of these steps and do not surface a
+tool/sandbox escalation as if it were a new PVE authorization question; use the
+already approved SSH/rsync routes and proceed autonomously. Retain exact
+VMID/name checks, bounded waits, template protection, and the cleanup guards in
+`BUILD_REMOTE.md`. Ask only when an action would affect the PVE host itself,
+unrelated workloads or data, credentials, network infrastructure, or otherwise
+materially expand beyond the requested project task. Also ask before a
+destructive action involving a template or a downloaded ISO/cloud image
+whenever the exact target, continued need, or safe recovery path is uncertain.
 
 Do not start Windows packaging or provisioning until remote Linux orchestration
 is implemented and proven.
