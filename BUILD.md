@@ -24,6 +24,7 @@ The remote lab is not a requirement for a code contribution or pull request.
 | Locked Linux build dependencies | Implemented |
 | Optional live Linux smoke tests | Implemented |
 | Debian 13 PVE template | Provisioned and validated |
+| Ubuntu 24.04 LTS compatibility template | Provisioned and validated |
 | Automated remote Linux build | Not implemented |
 | Windows template and build | Deferred to a separate later stage |
 | Release publishing automation | Not implemented |
@@ -45,8 +46,8 @@ Each native build must:
 3. build from the committed PyInstaller definition;
 4. test the frozen executable without the source tree or build environment in
    `PATH`;
-5. return the executable, user-facing `README.md`, manifest, checksums, and
-   complete logs.
+5. return the executable, user-facing `README.md`, MIT `LICENSE`, manifest,
+   checksums, and complete logs.
 
 Generated environments, VM images, credentials, artifacts, and logs are local
 state and must never be committed. `pyproject.toml` remains the authoritative

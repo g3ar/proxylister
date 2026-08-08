@@ -2,15 +2,22 @@
 """PyInstaller definition for the native Linux one-file executable."""
 
 from pathlib import Path
+import os
 
 
 ROOT = Path(SPECPATH).resolve().parents[1]
+BUILD_INFO = os.environ.get("PROXYTOOLS_BUILD_INFO")
+if not BUILD_INFO:
+    raise RuntimeError("PROXYTOOLS_BUILD_INFO is required")
 
 analysis = Analysis(
     [str(ROOT / "src/proxytools/__main__.py")],
     pathex=[str(ROOT / "src")],
     binaries=[],
-    datas=[(str(ROOT / "proxytools.conf"), ".")],
+    datas=[
+        (str(ROOT / "proxytools.conf"), "."),
+        (BUILD_INFO, "."),
+    ],
     hiddenimports=["proxytools.commands.list", "proxytools.commands.monitor"],
     hookspath=[],
     hooksconfig={},

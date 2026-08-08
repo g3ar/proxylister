@@ -1,9 +1,13 @@
 import contextlib
 import io
+from pathlib import Path
+import tempfile
 import unittest
+from unittest import mock
 
 from proxytools import __version__
-from proxytools.about import AUTHORS, BUILD_DATE, DESCRIPTION
+from proxytools import about as about_module
+from proxytools.about import AUTHORS, BUILD_DATE, DESCRIPTION, format_about
 from proxytools import cli
 from proxytools.commands import list as list_command
 from proxytools.commands import monitor
@@ -40,6 +44,19 @@ class TopLevelCliTests(unittest.TestCase):
         self.assertIn(DESCRIPTION, about)
         self.assertIn(", ".join(AUTHORS), about)
         self.assertIn(f"Build date: {BUILD_DATE}", about)
+
+    def test_frozen_about_reads_embedded_build_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "proxytools-build.txt").write_text(
+                "build_utc=2026-08-09T00:00:00Z\n"
+                f"source_commit={'a' * 40}\n",
+                encoding="utf-8",
+            )
+            with mock.patch.object(about_module.sys, "frozen", True, create=True), \
+                    mock.patch.object(about_module.sys, "_MEIPASS", directory, create=True):
+                about = format_about()
+        self.assertIn("Build date: 2026-08-09T00:00:00Z", about)
+        self.assertIn(f"Source commit: {'a' * 40}", about)
 
     def test_subcommand_program_names(self):
         self.assertEqual(list_command.build_parser().prog, "proxytools list")

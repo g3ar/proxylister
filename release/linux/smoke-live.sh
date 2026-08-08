@@ -12,6 +12,11 @@ fi
 BINARY=$(CDPATH= cd -- "$(dirname -- "$1")" && pwd)/$(basename -- "$1")
 test -x "$BINARY"
 
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+LOGS="$ROOT/release/.work/local-linux/logs"
+mkdir -p -- "$LOGS"
+rm -f -- "$LOGS/live-list.log" "$LOGS/live-monitor.log"
+
 LIVE_ROOT=$(mktemp -d)
 cleanup() {
     chmod -R u+w "$LIVE_ROOT" 2>/dev/null || true
@@ -27,15 +32,19 @@ LIST_TIMEOUT=${PROXYTOOLS_LIVE_LIST_TIMEOUT:-300}
 MONITOR_TIMEOUT=${PROXYTOOLS_LIVE_MONITOR_TIMEOUT:-60}
 
 timeout "$LIST_TIMEOUT" "$RUNTIME/proxytools" list \
-    >"$LIVE_ROOT/list.log" 2>&1
+    >"$LOGS/live-list.log" 2>&1 || {
+        printf 'Live list smoke failed; output follows:\n' >&2
+        sed -n '1,240p' "$LOGS/live-list.log" >&2
+        exit 1
+    }
 test -s "$RUNTIME/geodb/geoip.mmdb"
 test -e "$RUNTIME/working_proxies.txt"
 
 if ! printf 'q' | timeout "$MONITOR_TIMEOUT" \
     script -qefc "$RUNTIME/proxytools monitor" /dev/null \
-    >"$LIVE_ROOT/monitor.log" 2>&1; then
+    >"$LOGS/live-monitor.log" 2>&1; then
     printf 'Live monitor smoke failed; output follows:\n' >&2
-    sed -n '1,240p' "$LIVE_ROOT/monitor.log" >&2
+    sed -n '1,240p' "$LOGS/live-monitor.log" >&2
     exit 1
 fi
 

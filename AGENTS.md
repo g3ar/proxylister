@@ -347,11 +347,19 @@ Preserve `.work` after builds for diagnostics. `release/linux/build.sh` removes
 the previous ignored `release/bin/` at startup and promotes the complete latest
 artifact set there only after a successful build and offline smoke. Do not
 commit either directory or treat a dirty-worktree artifact as publishable.
+Live-smoke output belongs in `.work/local-linux/logs/` and must survive a
+failed check. The distributed Linux set includes the executable, end-user
+README, MIT `LICENSE`, manifest, and checksums. Each frozen build embeds its
+exact UTC build time and source commit for `--about`.
 
 The PVE server is `root@192.168.66.2`; Linux template `9000` is stopped,
 protected, and immutable between explicit maintenance sessions. Never build in
 the template or delete it. Build only in a disposable linked clone and apply
 the exact validation and cleanup guards from `BUILD_REMOTE.md`.
+Ubuntu 24.04 LTS compatibility template `9001` is also stopped, protected, and
+immutable. It is for running the returned standalone artifact in a disposable
+linked clone, not for producing a second Linux build. Never boot or delete
+either base template directly.
 
 Do not start Windows packaging or provisioning until remote Linux orchestration
 is implemented and proven.

@@ -61,6 +61,7 @@ After a successful build, the convenient manual-test copy is:
 release/bin/
   proxytools
   README.md
+  LICENSE
   MANIFEST.txt
   SHA256SUMS
 ```
@@ -76,9 +77,10 @@ instructions do not belong in that file.
 `MANIFEST.txt` records the artifact name, project version, source commit,
 clean/dirty worktree state, build UTC time, operating system, architecture,
 glibc, Python, pip, PyInstaller, and the constraints-file checksum.
-`SHA256SUMS` covers the executable, user `README.md`, and manifest. The binary
-itself reports its embedded application version through `./proxytools
---version`; version and architecture do not belong in its filename. An artifact
+`SHA256SUMS` covers the executable, user `README.md`, MIT `LICENSE`, and
+manifest. The binary itself reports its embedded application version through
+`./proxytools --version` and its exact build time and source commit through
+`./proxytools --about`; version and architecture do not belong in its filename. An artifact
 whose manifest says `source_tree=dirty` is for development testing only.
 
 The build script writes detailed output to `logs/build.log` and prints the
@@ -123,6 +125,10 @@ This bounded check downloads/opens the GeoIP database, completes a real `list`
 run, then starts `monitor` in a PTY and exits through its `q` action. Default
 timeouts are 300 seconds for `list` and 60 seconds for `monitor`; override them
 with `PROXYTOOLS_LIVE_LIST_TIMEOUT` and `PROXYTOOLS_LIVE_MONITOR_TIMEOUT`.
+The complete list and monitor output remains in
+`release/.work/local-linux/logs/live-list.log` and `live-monitor.log`, including
+after a failed check. A later build or live-smoke start replaces its own old
+diagnostics; no failure cleanup removes the current attempt.
 
 The live test is diagnostic and release-maintainer-facing, not part of normal
 contributor iteration. Interactive browser validation remains manual because

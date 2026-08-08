@@ -68,12 +68,42 @@ Never boot or build directly in template `9000`. Template maintenance is an
 explicit task followed by clean shutdown and validation through a disposable
 clone.
 
+## Linux compatibility template
+
+The second protected template checks that the standalone binary also runs on
+the current Ubuntu LTS baseline:
+
+| Property | Value |
+|---|---|
+| VMID | `9001` |
+| Name | `proxytools-ubuntu-2404-check-template` |
+| OS | Ubuntu 24.04 LTS amd64 cloud image |
+| CPU | 2 vCPU, host type |
+| RAM | 2 GiB, no ballooning |
+| Disk | 20 GiB on `local-lvm` |
+| Network | VirtIO on `vmbr0`, DHCP |
+| Access | `builder` with the same dedicated SSH key |
+| State | stopped, `template=1`, `protection=1` |
+
+This is a runtime compatibility target, not a second build environment. It
+contains QEMU Guest Agent and CA certificates but no project source or frozen
+artifact. Create a disposable linked clone, transfer the complete artifact
+set, verify `SHA256SUMS`, and exercise the binary there. The initial validation
+successfully ran the Debian 13-built executable on Ubuntu 24.04 with glibc
+2.39, including `--version`, `--about`, and help for both modes.
+
+Never boot template `9001` directly. Its cloud-init vendor data is stored as
+`local:snippets/proxytools-ubuntu-2404-check-vendor.yaml`. Validate changes
+through an unprotected disposable linked clone and delete only that exact clone
+after a clean shutdown.
+
 ## Manual linked-clone lifecycle
 
 The following documents the proven manual mechanism. It is not yet packaged as
 release automation.
 
-Choose an unused VMID and an exact disposable name. Verify the template first:
+Choose an unused VMID and an exact disposable name. Verify the build template
+first:
 
 ```bash
 ssh root@192.168.66.2 qm status 9000
@@ -137,8 +167,8 @@ cd /home/builder/proxytools
 A real release must not use a dirty-worktree rsync. Future orchestration must
 create one clean, checksummed source archive from the release worktree, upload
 it, verify it inside the clone, run the committed build script, retrieve the
-`proxytools` artifact, user `README.md`, `MANIFEST.txt`, `SHA256SUMS`, and full
-logs, then independently verify returned checksums. The optional live smoke may
+`proxytools` artifact, user `README.md`, MIT `LICENSE`, `MANIFEST.txt`,
+`SHA256SUMS`, and full logs, then independently verify returned checksums. The optional live smoke may
 run in the clone as a separate network-dependent release gate; it must remain
 distinct from the deterministic build result.
 

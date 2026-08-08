@@ -9,7 +9,26 @@ The project has one entrypoint and two modes:
 
 The default mode is `list`, so `./proxytools` works immediately after cloning.
 
-## Quick start
+## Quick start with a downloaded binary
+
+Download the Linux archive from the project's GitHub Releases page, extract
+all of its files into one directory, then run:
+
+```bash
+chmod +x proxytools
+./proxytools
+```
+
+Keep `proxytools`, `README.md`, and `LICENSE` together. The directory containing
+the executable must be writable: on first use Proxy Tools creates
+`proxytools.conf`, `geodb/`, and `proxydb/` beside it, and `list` writes its
+latest valid results to `working_proxies.txt`. No Python installation or `pip`
+command is needed for the standalone binary.
+
+The Linux download targets current stable/LTS distributions. If it does not
+run on an older system, use the source checkout below.
+
+## Quick start from source
 
 Requirements:
 
@@ -231,7 +250,9 @@ Press `q` or `Ctrl+C` to stop. Both use the same graceful shutdown path. Work th
 
 Run `./proxytools --about` from the shell or press `F1` in the monitor to see the project name, one-sentence description, current version, contributor list, and build date. Both interfaces use the same project metadata.
 
-Until standalone release builds are introduced, the build date contains the project build year. A future release pipeline will replace it with the exact reproducible release-build date.
+Source checkouts display the project build year. A downloaded standalone
+binary displays its exact UTC build time and source commit, embedded anew by
+every build.
 
 ## Proxy statuses
 
@@ -360,7 +381,7 @@ Source files, Git metadata, `.env` files, and arbitrary redirected user output a
 
 ## Troubleshooting
 
-### The first run takes a while
+### The first source run takes a while
 
 The first real command creates `.venv`, installs dependencies, and downloads the monthly GeoIP database. Later starts reuse them.
 

@@ -35,6 +35,15 @@ grep -Ev '^[[:space:]]*(#|$)' "$CONSTRAINTS" \
     | LC_ALL=C sort -f >"$WORK/resolved-packages.txt"
 diff -u "$WORK/expected-packages.txt" "$WORK/resolved-packages.txt"
 
+BUILD_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+SOURCE_COMMIT=$(git rev-parse HEAD)
+PROXYTOOLS_BUILD_INFO="$WORK/proxytools-build.txt"
+export PROXYTOOLS_BUILD_INFO
+{
+    printf 'build_utc=%s\n' "$BUILD_UTC"
+    printf 'source_commit=%s\n' "$SOURCE_COMMIT"
+} >"$PROXYTOOLS_BUILD_INFO"
+
 cd "$ROOT"
 "$VENV/bin/python" -m unittest discover -v
 find src/proxytools -name '*.py' -print0 \
@@ -50,6 +59,7 @@ sh -n proxytools release/linux/build.sh release/linux/smoke.sh \
     "$ROOT/release/pyinstaller/proxytools.spec"
 
 cp "$ROOT/README.md" "$DIST/README.md"
+cp "$ROOT/LICENSE" "$DIST/LICENSE"
 chmod 0755 "$DIST/proxytools"
 
 VERSION=$("$DIST/proxytools" --version)
@@ -64,13 +74,13 @@ ARTIFACT=proxytools
 {
     printf 'artifact=%s\n' "$ARTIFACT"
     printf 'version=%s\n' "$VERSION"
-    printf 'source_commit=%s\n' "$(git rev-parse HEAD)"
+    printf 'source_commit=%s\n' "$SOURCE_COMMIT"
     if test -n "$(git status --porcelain)"; then
         printf 'source_tree=dirty\n'
     else
         printf 'source_tree=clean\n'
     fi
-    printf 'build_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'build_utc=%s\n' "$BUILD_UTC"
     printf 'os=%s\n' "$(. /etc/os-release; printf '%s' "$PRETTY_NAME")"
     printf 'architecture=%s\n' "$(uname -m)"
     printf 'glibc=%s\n' "$(ldd --version | head -n 1)"
@@ -82,7 +92,7 @@ ARTIFACT=proxytools
 
 (
     cd "$DIST"
-    sha256sum "$ARTIFACT" README.md MANIFEST.txt >SHA256SUMS
+    sha256sum "$ARTIFACT" README.md LICENSE MANIFEST.txt >SHA256SUMS
 )
 
 "$ROOT/release/linux/smoke.sh" "$DIST/$ARTIFACT" \

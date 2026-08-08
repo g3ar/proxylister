@@ -30,7 +30,10 @@ run_clean() {
 VERSION=$(run_clean "$RUNTIME/proxytools" --version)
 test -n "$VERSION"
 printf '%s\n' "$VERSION"
-run_clean "$RUNTIME/proxytools" --about | grep -F "Proxy Tools $VERSION"
+ABOUT=$(run_clean "$RUNTIME/proxytools" --about)
+printf '%s\n' "$ABOUT" | grep -F "Proxy Tools $VERSION"
+printf '%s\n' "$ABOUT" | grep -E 'Build date: [0-9]{4}-[0-9]{2}-[0-9]{2}T'
+printf '%s\n' "$ABOUT" | grep -E 'Source commit: [0-9a-f]{40}'
 run_clean "$RUNTIME/proxytools" --help | grep -F 'Usage:'
 run_clean "$RUNTIME/proxytools" list --help | grep -F -- '--max-latency'
 test -s "$RUNTIME/proxytools.conf"
