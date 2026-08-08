@@ -2,6 +2,9 @@ import argparse
 import contextlib
 import io
 import os
+from pathlib import Path
+import signal
+import tempfile
 import threading
 import unittest
 from unittest.mock import Mock, patch
@@ -13,6 +16,7 @@ from proxytools import http
 from proxytools.commands import list as list_command
 from proxytools.checking import proxy as checker
 from proxytools.models import ProxyResult
+from proxytools.output.results import write_proxy_file
 from proxytools.sources import proxyscrape
 
 
@@ -35,6 +39,56 @@ class FakeResponse:
 
 
 class ProxyLibraryTests(unittest.TestCase):
+    def test_list_defers_sigint_until_progress_cleanup_and_saves_partial_results(self):
+        class FragileProgress:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, _exc, _traceback):
+                if exc_type is KeyboardInterrupt:
+                    raise RuntimeError("release unlocked lock")
+
+            def add_task(self, *_args, **_kwargs):
+                return 1
+
+            def update(self, *_args, **_kwargs):
+                os.kill(os.getpid(), signal.SIGINT)
+
+        settings = Mock(url=None, max_latency=500, workers=1, timeout=1, samples=1)
+        result = ProxyResult("http", "192.0.2.1:80", True, 50)
+        with patch.object(list_command, "load_config", return_value=settings), patch.object(
+            list_command, "fetch_all_proxies", return_value=[("http", result.proxy)]
+        ), patch.object(
+            list_command, "check_candidate", return_value=result
+        ), patch.object(
+            list_command, "progress_display", return_value=FragileProgress()
+        ), patch.object(
+            list_command, "write_proxy_file", return_value=(Path("working_proxies.txt"), 1)
+        ) as writer, contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(list_command.main([]), 0)
+
+        writer.assert_called_once_with([result])
+
+    def test_proxy_file_atomically_replaces_stale_plain_results(self):
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "proxytools.output.results.working_proxies_path",
+            return_value=Path(directory) / "working_proxies.txt",
+        ):
+            path = Path(directory) / "working_proxies.txt"
+            path.write_text("stale\n")
+            results = [
+                ProxyResult("socks5", "198.51.100.2:1080", True, 20),
+                ProxyResult("http", "192.0.2.1:80", True, 10),
+            ]
+            written, count = write_proxy_file(results)
+
+            self.assertEqual((written, count), (path, 2))
+            self.assertEqual(
+                path.read_text(),
+                "socks5://198.51.100.2:1080\nhttp://192.0.2.1:80\n",
+            )
+            self.assertFalse((Path(directory) / ".working_proxies.txt.tmp").exists())
+
     def test_fetch_proxy_list_extracts_and_dedupes(self):
         response = FakeResponse("1.2.3.4:80\ninvalid\n1.2.3.4:80\n5.6.7.8:1080")
         with patch.object(proxyscrape, "session") as session:
@@ -63,6 +117,17 @@ class ProxyLibraryTests(unittest.TestCase):
             side_effect=proxyscrape.ProxySourceUnavailable("offline"),
         ), contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(list_command.main([]), 1)
+
+    def test_empty_successful_list_clears_the_saved_proxy_file(self):
+        settings = Mock(url=None, max_latency=500, workers=1, timeout=1, samples=1)
+        with patch.object(list_command, "load_config", return_value=settings), patch.object(
+            list_command, "fetch_all_proxies", return_value=[]
+        ), patch.object(
+            list_command, "write_proxy_file", return_value=(Path("working_proxies.txt"), 0)
+        ) as writer, contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(list_command.main([]), 0)
+
+        writer.assert_called_once_with([])
 
     def test_browser_validation_submits_only_one_check_at_a_time(self):
         first_browser_started = threading.Event()

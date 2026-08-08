@@ -29,6 +29,7 @@ MONITOR_TIMEOUT=${PROXYTOOLS_LIVE_MONITOR_TIMEOUT:-60}
 timeout "$LIST_TIMEOUT" "$RUNTIME/proxytools" list \
     >"$LIVE_ROOT/list.log" 2>&1
 test -s "$RUNTIME/geodb/geoip.mmdb"
+test -e "$RUNTIME/working_proxies.txt"
 
 if ! printf 'q' | timeout "$MONITOR_TIMEOUT" \
     script -qefc "$RUNTIME/proxytools monitor" /dev/null \

@@ -61,6 +61,13 @@ Progress is written to stderr, while proxy addresses are written to stdout. This
 ./proxytools | head -n 10
 ```
 
+Every completed scan also atomically replaces `working_proxies.txt` beside the
+launcher or downloaded binary with the same plain valid connection strings.
+If you stop an interactive scan with `Ctrl+C`, Proxy Tools cancels queued work,
+waits only for bounded active checks, and saves the valid proxies collected up
+to that point. Shell redirection remains available when you want a different
+filename or pipeline.
+
 ### Find proxies suitable for a particular website
 
 ```bash
@@ -345,6 +352,7 @@ This returns the directory to its freshly cloned runtime state by removing:
 - `.venv` and installed dependencies;
 - proxy history and locks in `proxydb/`;
 - the downloaded GeoIP database in `geodb/`;
+- the automatically saved `working_proxies.txt` list;
 - Python bytecode and common test/build caches;
 - legacy generated files from older versions.
 

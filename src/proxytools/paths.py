@@ -68,3 +68,8 @@ def geoip_database_path() -> Path:
 
 def geoip_version_path() -> Path:
     return _migrate_legacy(_runtime_directory("geodb") / "version", "proxytools-geoip.version")
+
+
+def working_proxies_path() -> Path:
+    """Return the plain-text output file written by the ``list`` command."""
+    return tool_home() / "working_proxies.txt"

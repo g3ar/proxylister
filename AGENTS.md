@@ -216,6 +216,12 @@ IP from the external identity endpoint. Country/city are resolved locally from
 that exit IP. ProxyScrape metadata is not authoritative for browser exit
 location.
 
+`list` writes selected plain connection strings to stdout and atomically to
+`working_proxies.txt` beside the launcher or frozen executable. A normal
+`Ctrl+C` must defer interruption while Rich/executor locks are active, complete
+bounded shutdown, and save valid results collected so far without displaying
+`release unlocked lock`.
+
 When `--url` or config `URL` is present, check it with lightweight `requests`
 through every proxy. Do not invoke Selenium for continuous URL checks. HTTP 403
 is accepted in monitor/list URL reachability because anti-bot sites may remain
