@@ -12,12 +12,30 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import shutil
+import sys
 
 
 def tool_home() -> Path:
     """Return the canonical directory containing the ``proxytools`` launcher."""
     configured = os.environ.get("PROXYTOOLS_HOME")
-    return Path(configured).resolve() if configured else Path.cwd().resolve()
+    if configured:
+        return Path(configured).resolve()
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path.cwd().resolve()
+
+
+def install_default_config(target: Path) -> None:
+    """Create the external config from the copy bundled in a frozen binary."""
+    if target.exists() or not getattr(sys, "frozen", False):
+        return
+    bundle = Path(getattr(sys, "_MEIPASS")) / "proxytools.conf"
+    try:
+        with bundle.open("rb") as source, target.open("xb") as destination:
+            shutil.copyfileobj(source, destination)
+    except FileExistsError:
+        return
 
 
 def _runtime_directory(name: str) -> Path:

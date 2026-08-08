@@ -24,3 +24,4 @@ proxytools-geoip.mmdb
 proxytools-geoip.version
 proxydb/
 geodb/
+release/.work/

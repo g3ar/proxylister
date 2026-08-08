@@ -10,11 +10,36 @@ from proxytools.paths import (
     database_path,
     geoip_database_path,
     geoip_version_path,
+    install_default_config,
     lock_path,
+    tool_home,
 )
 
 
 class RuntimePathTests(unittest.TestCase):
+    def test_frozen_home_is_the_executable_directory(self):
+        with patch.dict(os.environ, {}, clear=True), patch("sys.frozen", True, create=True), patch(
+            "sys.executable", "/opt/proxytools/proxytools"
+        ):
+            self.assertEqual(tool_home(), Path("/opt/proxytools"))
+
+    def test_frozen_default_config_is_created_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = root / "bundle"
+            bundle.mkdir()
+            (bundle / "proxytools.conf").write_text("WORKERS=10\n")
+            target = root / "runtime" / "proxytools.conf"
+            target.parent.mkdir()
+            with patch("sys.frozen", True, create=True), patch(
+                "sys._MEIPASS", str(bundle), create=True
+            ):
+                install_default_config(target)
+                self.assertEqual(target.read_text(), "WORKERS=10\n")
+                target.write_text("WORKERS=20\n")
+                install_default_config(target)
+                self.assertEqual(target.read_text(), "WORKERS=20\n")
+
     def test_legacy_root_files_move_into_runtime_directories(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(
             os.environ, {"PROXYTOOLS_HOME": directory}

@@ -43,6 +43,28 @@ The project deliberately favors small, removable designs. Do not add another
 entrypoint, dependency manifest, generic result flag, background service, or
 configuration layer for a hypothetical future need.
 
+## Local development and build checks
+
+Normal development is entirely local. Contributors are expected to edit the
+checkout, run focused regression tests while iterating, and finish with the
+full validation commands in this guide. Access to the maintainer's PVE server
+is not required for development, bug fixes, pull requests, or ordinary code
+review.
+
+Most changes do not require rebuilding the standalone executable on every
+iteration. Run the local one-file workflow when changing packaging, startup,
+runtime paths, bundled resources, configuration bootstrap, imports that may
+affect PyInstaller, or before handing off a release-related change:
+
+```bash
+./release/linux/build.sh
+```
+
+See [BUILD_LOCAL.md](BUILD_LOCAL.md) for its artifact, manifest, log, and smoke-
+test contract. The remote PVE lab is an additional release-maintainer isolation
+layer documented separately in `BUILD_REMOTE.md`; it is not part of the normal
+contributor loop.
+
 ## Mental model
 
 Both commands share startup, discovery, and lightweight proxy checking:

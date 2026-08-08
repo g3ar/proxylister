@@ -6,7 +6,7 @@ from pathlib import Path
 import shlex
 from urllib.parse import urlparse
 
-from proxytools.paths import tool_home
+from proxytools.paths import install_default_config, tool_home
 
 MAX_WORKERS = 100
 
@@ -141,6 +141,10 @@ def config_path() -> Path:
 def load_config(path: Path | None = None) -> RuntimeConfig:
     """Parse the complete flat KEY=value config without executing shell code."""
     path = path or config_path()
+    try:
+        install_default_config(path)
+    except OSError as error:
+        raise ConfigError(f"cannot create {path}: {error}") from error
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError as error:

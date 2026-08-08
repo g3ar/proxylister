@@ -304,8 +304,9 @@ updates to `.gitignore`, cleanup code/tests, and user documentation.
 
 - `README.md` is detailed user documentation with use cases and examples.
 - `DEVELOPERS.md` contains internals and contributor guidance.
-- `BUILD.md` is the active PVE release-lab runbook and future automation
-  specification.
+- `BUILD.md` is the maintainer-only build overview and status map.
+- `BUILD_LOCAL.md` is the local Linux build and frozen-smoke runbook.
+- `BUILD_REMOTE.md` is the PVE template and remote Linux build-lab runbook.
 - Module docstrings at the top of scripts should explain what the file is, why
   it exists, and how it is used.
 - CLI `--help` output is derived from the corresponding module documentation
@@ -317,31 +318,26 @@ the README.
 
 ## Release/build lab
 
-Release/build work is active, but implement it incrementally. Current
-development and intermediate testing still use the existing `git clone`
-workflow; frozen executables are produced only from an explicit clean release
-worktree after the packaging scripts and dependency locks exist.
+Release/build work is active and split into two explicit Linux workflows. The
+local workflow in `BUILD_LOCAL.md` is the normal contributor path and is
+implemented. PVE access is never required for ordinary development, fixes,
+tests, reviews, or pull requests. The remote workflow in `BUILD_REMOTE.md` is
+an additional maintainer release layer: it has a provisioned Debian template,
+but its orchestration is not implemented. Read the relevant runbook before
+build work; do not merge local and remote operator instructions back into one
+document.
 
-The build server is a Proxmox VE host reachable from the development machine as
-`root@192.168.66.2`. Preserve its existing host configuration. The provisioned
-Linux builder is:
+Generated local build output lives under ignored `release/.work/`. Local dirty-
+worktree artifacts are for development only. A real release requires one clean,
+checksummed source snapshot and locked dependencies.
 
-- PVE VM template `9000`, named `proxytools-linux-template`;
-- Debian 13 stable amd64, 2 vCPU, 3 GiB RAM, 20 GiB thin disk;
-- stored on `local-lvm`, with QEMU Guest Agent and DHCP on `vmbr0`;
-- account `builder`, authenticated with the dedicated local key
-  `~/.ssh/proxytools-build`;
-- template protection enabled and automatic cloud-init package upgrades
-  disabled.
+The PVE server is `root@192.168.66.2`; Linux template `9000` is stopped,
+protected, and immutable between explicit maintenance sessions. Never build in
+the template or delete it. Build only in a disposable linked clone and apply
+the exact validation and cleanup guards from `BUILD_REMOTE.md`.
 
-Create an LVM-thin linked clone for each build, immediately disable protection
-on the clone, discover its address through the guest agent, and upload the
-entire current release source snapshot including the versioned build/test
-scripts. Build and test only inside the clone. After success, retrieve artifacts
-and logs, shut the clone down, validate its exact VMID/name, and delete it. Keep
-the template stopped and immutable between explicit maintenance sessions. A
-failed clone may be retained briefly for diagnosis. See `BUILD.md` for the
-commands, validation, and cleanup rules.
+Do not start Windows packaging or provisioning until remote Linux orchestration
+is implemented and proven.
 
 The supported standalone scope is:
 
@@ -359,11 +355,10 @@ The supported standalone scope is:
 - embedded defaults that create external `proxytools.conf` on first run.
 
 Release work happens only for stable versions in a temporary release branch
-and separate worktree. Both binaries must be built from the same clean commit
-and pass native automated tests. Manual TUI acceptance happens before the user
-declares a release ready and is not part of the release pipeline. Tag only
-after both builds and automated smoke tests succeed. See `BUILD.md` for the
-full proposed procedure.
+and separate worktree. Both binaries must eventually be built from the same
+clean commit and pass native automated tests. Manual TUI acceptance happens
+before the user declares a release ready and is not part of the release
+pipeline. See the three build documents for current scope and status.
 
 ## Git collaboration policy
 
