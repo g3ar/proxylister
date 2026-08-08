@@ -1,9 +1,9 @@
 # Proxy Tools release build lab
 
 This document describes the release build and test environment used for the
-standalone Proxy Tools executables. It is an operator runbook for a Debian 13
-development host and a specification for the future automation under
-`release/`.
+standalone Proxy Tools executables. It is an operator runbook for the Proxmox
+VE build server at `192.168.66.2` and a specification for the future automation
+under `release/`.
 
 The supported standalone release targets are deliberately narrow:
 
@@ -24,14 +24,17 @@ executables are built only after a version has been declared release-ready.
 The lab consists of:
 
 ```text
-Debian 13 build host
+development machine
   ├── source repository and temporary release worktree
-  ├── libvirt/KVM
-  ├── immutable Linux builder template
-  ├── immutable Windows builder template
-  └── release/.work/                 temporary local staging
+  ├── dedicated build SSH identity
+  ├── release/.work/                 temporary local staging
         ├── current/                 current build and logs
         └── failed/                  most recent failed build only
+
+PVE build server (root@192.168.66.2)
+  ├── immutable Linux builder template (VMID 9000)
+  ├── immutable Windows builder template (planned)
+  └── disposable LVM-thin linked clones
 ```
 
 For every release, the operator creates one disposable clone of each template.
@@ -39,95 +42,68 @@ The exact same source archive is copied to both builders. Each VM runs its own
 tests, produces its native executable, runs smoke tests without relying on the
 developer's Python environment, and returns its artifact and logs to the host.
 
-The disposable VMs are deleted after a successful release. On failure, retain
+The disposable clones are deleted after a successful release. On failure, retain
 only the failed VM that is useful for immediate diagnosis; delete it when the
 problem has been understood or before the next release attempt. VM images,
 installation media, credentials, virtual environments, build output, and logs
 must never be committed.
 
-## 2. Host requirements
+Linux executables target current stable or LTS distributions. They are not
+required to run on older distributions with older glibc; users of those systems
+can run the source checkout with a compatible Python environment.
 
-The examples assume:
+## 2. Build-server baseline
 
-- Debian 13 on an x86_64 machine;
-- hardware virtualization enabled in UEFI/BIOS;
-- a user with `sudo` access;
-- enough resources for two builder VMs, although they may run sequentially;
-- internet access from the VMs for Python dependencies and live smoke tests;
-- the project cloned somewhere writable by the operator.
+The current host is a ThinkPad X230 running Proxmox VE 9.2 on Debian 13:
 
-A practical minimum is 4 CPU cores, 16 GiB RAM, and 80 GiB free storage. A more
-comfortable allocation is 8 or more cores, 32 GiB RAM, and SSD storage.
+- Intel Core i5-3230M, 4 logical CPUs, VT-x;
+- 8 GiB RAM;
+- `local-lvm`, approximately 49 GiB LVM-thin storage for VM disks;
+- `local`, approximately 37 GiB directory storage for images and snippets;
+- `vmbr0` on `192.168.66.0/24`, with DHCP available to guests.
 
-Verify virtualization before installing anything:
+Builders run sequentially on this host. Do not assume that Linux and Windows
+builders can fit comfortably at the same time. Verify the host before a release:
 
 ```bash
-lscpu | grep -E 'Architecture|Virtualization'
-test -e /dev/kvm && echo 'KVM device is available'
+pvesm status
+qm list
+free -h
 ```
 
 If `/dev/kvm` is absent, enable Intel VT-x or AMD-V in firmware and ensure that
 the `kvm_intel` or `kvm_amd` kernel module is loaded. Do not continue with pure
 QEMU emulation: it is unnecessarily slow for this job.
 
-## 3. Install QEMU and libvirt on Debian 13
+## 3. PVE access and storage
 
-Install the host-side tools:
-
-```bash
-sudo apt update
-sudo apt install --yes \
-  qemu-system-x86 \
-  qemu-utils \
-  libvirt-daemon-system \
-  libvirt-clients \
-  virtinst \
-  virt-manager \
-  virt-viewer \
-  genisoimage \
-  guestfs-tools \
-  openssh-client
-```
-
-Enable libvirt and add the current user to the relevant groups:
+The development machine reaches PVE with key-based SSH:
 
 ```bash
-sudo systemctl enable --now libvirtd
-sudo usermod -aG libvirt,kvm "$USER"
+ssh root@192.168.66.2 pveversion
 ```
 
-Log out and back in so the new group membership is applied. Then verify the
-system connection:
+VM disks live on `local-lvm`. It is LVM-thin, so PVE creates fast linked clones
+whose data volumes reference the immutable template base volume. ISO/cloud
+images and cloud-init snippets live on `local`; its configured content types
+include `iso` and `snippets`.
 
-```bash
-virsh --connect qemu:///system list --all
-virt-host-validate qemu
-```
-
-Use `qemu:///system` consistently. Mixing the per-user `qemu:///session`
-instance with the system instance is a common source of missing networks,
-images, and permissions.
-
-The default libvirt NAT network is suitable here: builders can reach the
-internet and the host can reach them through their private addresses, while no
-service is exposed directly on the physical LAN.
-
-```bash
-virsh --connect qemu:///system net-start default 2>/dev/null || true
-virsh --connect qemu:///system net-autostart default
-virsh --connect qemu:///system net-list --all
-```
+Do not install a second libvirt stack on PVE and do not manage these VMs with
+`virsh`. Use PVE's `qm` and `pvesm` commands. Do not create LXC builders: native
+Linux and Windows release builds use the same VM isolation model.
 
 ## 4. Directory and naming conventions
 
-Keep large VM data outside the Git repository. One possible host layout is:
+Keep all VM data outside the Git repository. The current layout is:
 
 ```text
-/var/lib/libvirt/images/
-  proxytools-linux-template.qcow2
-  proxytools-windows-template.qcow2
-  proxytools-linux-vX.Y.Z.qcow2       disposable
-  proxytools-windows-vX.Y.Z.qcow2     disposable
+/var/lib/vz/template/iso/
+  debian-13-genericcloud-amd64.qcow2
+/var/lib/vz/snippets/
+  proxytools-linux-vendor.yaml         provisioning record
+local-lvm:
+  base-9000-disk-0                     immutable Linux template disk
+  vm-<VMID>-disk-0                     disposable linked-clone overlay
 
 project checkout/
   BUILD.md
@@ -135,22 +111,22 @@ project checkout/
     README.md
     linux/
     windows/
-    vm/
+    pve/
     pyinstaller/
     host/
     .work/                            ignored, temporary artifacts/logs
 ```
 
-Recommended libvirt domain names are:
+PVE identities are:
 
-- `proxytools-linux-template`;
-- `proxytools-windows-template`;
-- `proxytools-linux-vX.Y.Z`;
-- `proxytools-windows-vX.Y.Z`.
+- `9000`, `proxytools-linux-template`;
+- a future reserved VMID and `proxytools-windows-template`;
+- dynamically selected VMIDs named `proxytools-linux-vX.Y.Z` or
+  `proxytools-windows-vX.Y.Z`.
 
-Never run builds in a template. Shut it down cleanly after provisioning and
-treat it as immutable. Update a template through an explicit maintenance
-session, shut it down again, then take a backup before the next release.
+Never run builds in a template. Template `9000` must remain stopped with
+`template=1` and `protection=1`. Update it only through an explicit maintenance
+procedure, validate a disposable clone afterward, and shut it down again.
 
 ## 5. SSH identity for disposable builders
 
@@ -163,9 +139,10 @@ ssh-keygen -t ed25519 -f "$HOME/.ssh/proxytools-build" \
   -C proxytools-build -N ''
 ```
 
-The private key stays on the Debian host. Put only its public half in both VM
-templates. Because the guests are ephemeral and use recycled addresses, keep a
-separate known-hosts file rather than weakening host-key checks globally:
+The private key stays on the development machine at
+`~/.ssh/proxytools-build`. Put only its public half in VM templates. Because
+guests are ephemeral and use recycled addresses, keep a separate known-hosts
+file rather than weakening host-key checks globally:
 
 ```bash
 install -d -m 700 "$HOME/.cache/proxytools-build"
@@ -186,39 +163,12 @@ release path should be key-based and non-interactive.
 
 ## 6. Linux builder template
 
-Use a conservative x86_64 Linux userspace for the release binary. A binary
-built against an older glibc generally runs on newer distributions, while the
-reverse is not guaranteed. The exact supported glibc baseline must be fixed
-before the first standalone release; Debian 11 is a reasonable candidate for a
-`glibc >= 2.31` baseline. Do not silently change this image between releases.
+The provisioned Linux template is VMID `9000`, based on the current official
+Debian 13 stable generic cloud image. It has 2 vCPU, 3 GiB fixed RAM, a 20 GiB
+thin disk, VirtIO networking on `vmbr0`, QEMU Guest Agent, DHCP, serial console,
+and the non-root `builder` account.
 
-Create the VM with `virt-install` or virt-manager. A typical allocation is:
-
-- 2 to 4 vCPUs;
-- 4 GiB RAM;
-- 24 GiB qcow2 disk;
-- default NAT network;
-- minimal server installation, no desktop required.
-
-Example interactive creation, after downloading installation media outside the
-repository:
-
-```bash
-sudo virt-install \
-  --connect qemu:///system \
-  --name proxytools-linux-template \
-  --memory 4096 \
-  --vcpus 4 \
-  --cpu host-passthrough \
-  --disk path=/var/lib/libvirt/images/proxytools-linux-template.qcow2,size=24,format=qcow2 \
-  --cdrom /path/to/debian-installer.iso \
-  --network network=default,model=virtio \
-  --graphics spice \
-  --os-variant debian11
-```
-
-Inside the guest, create a dedicated `builder` account and install only the
-native build prerequisites:
+The image contains only native build prerequisites:
 
 ```bash
 sudo apt update
@@ -227,14 +177,21 @@ sudo apt install --yes \
   python3-venv \
   python3-dev \
   build-essential \
+  git \
+  rsync \
   openssh-server \
-  ca-certificates
+  ca-certificates \
+  curl \
+  file \
+  qemu-guest-agent
 sudo systemctl enable --now ssh
 ```
 
-Copy the dedicated public key into `/home/builder/.ssh/authorized_keys`, with
-directory mode `0700` and file mode `0600`. Confirm a key-based login from the
-host before sealing the template.
+Python project dependencies, PyInstaller, the source tree, and versioned
+build/test scripts are not installed in the template. Every clone receives the
+current release snapshot and creates a fresh `.venv`. Cloud-init automatic
+package upgrades are disabled (`ciupgrade=0`) so clone contents do not drift
+during a release attempt.
 
 Chrome is not needed to compile Selenium into the executable. Install a browser
 in the builder only if a release smoke test explicitly exercises browser
@@ -248,23 +205,30 @@ ldd --version | head -n 1
 python3 --version
 ```
 
-Finally, clean package caches, shut the guest down, and back up its qcow2 image.
+On 2026-08-08 the template was verified by creating linked clone `9001`,
+transferring the current worktree with `rsync`, installing the project, and
+passing the complete 77-test suite plus module compilation and launcher syntax
+validation. The smoke clone was then deleted. Repeat an equivalent disposable-
+clone test after every template maintenance session; do not treat the recorded
+test count as a permanent expectation.
 
 ## 7. Windows builder template
 
-Use a Windows 10 x86_64 installation image supplied and licensed by the
-operator. A typical allocation is:
+The Windows template has not been provisioned yet. Use a Windows 10 x86_64
+installation image supplied and licensed by the operator. Create it as a PVE
+VM on `local-lvm`; do not introduce a separate hypervisor workflow. A typical
+allocation is:
 
 - 4 vCPUs;
-- 8 GiB RAM;
-- 50 GiB qcow2 disk;
-- default NAT network;
+- up to 6 GiB RAM on the current 8 GiB PVE host;
+- 50 GiB thin disk;
+- VirtIO networking on `vmbr0`;
 - VirtIO storage and network drivers where available.
 
-Create it with virt-manager or `virt-install`. Interactive installation through
-virt-manager is usually easier because Windows may need the VirtIO driver ISO
-during setup. The resulting libvirt domain must be named
-`proxytools-windows-template`.
+Use the PVE console for interactive installation because Windows may need the
+VirtIO driver ISO during setup. Record the selected VMID here and in
+`AGENTS.md` after provisioning, then protect and convert the stopped VM to a
+PVE template.
 
 Provision the template with:
 
@@ -305,32 +269,38 @@ If `builder` is an administrator, Windows OpenSSH may instead use
 `C:\ProgramData\ssh\administrators_authorized_keys`; consult the effective
 `sshd_config`. A non-administrator build account avoids that special case.
 
-Verify from the Debian host that SSH, SCP, PowerShell, and Python all work:
+Verify from the development machine that SSH, SCP, PowerShell, and Python all
+work:
 
 ```bash
 ssh -i "$HOME/.ssh/proxytools-build" builder@WINDOWS_IP \
   'powershell -NoProfile -Command "$PSVersionTable.PSVersion; py -3 --version"'
 ```
 
-Do not install a project `.venv` into the image. A fresh virtual environment is
-created inside every disposable release VM and disappears with it. Shut down
-the provisioned template cleanly and back up its qcow2 image.
+Do not install a project `.venv` or versioned build scripts into the image. A
+fresh virtual environment and the current scripts arrive with the source
+snapshot in every disposable clone. Shut the provisioned template down cleanly
+and validate it through a linked clone before use.
 
 ## 8. Discovering VM addresses
 
-Start a guest and ask the libvirt guest agent or DHCP lease table for its
-address:
+Start a clone and ask its QEMU Guest Agent for its address:
 
 ```bash
-virsh --connect qemu:///system start VM_NAME
-virsh --connect qemu:///system domifaddr VM_NAME --source lease
-virsh --connect qemu:///system net-dhcp-leases default
+ssh root@192.168.66.2 qm start VMID
+ssh root@192.168.66.2 qm agent VMID ping
+ssh root@192.168.66.2 qm agent VMID network-get-interfaces
 ```
 
-Installing `qemu-guest-agent` in Linux and the corresponding Windows guest
-agent improves address discovery and clean shutdown, but DHCP lease lookup is a
-valid fallback. Automation should poll with a bounded timeout and print the VM
-console location on failure; it must not wait forever.
+Poll `qm agent VMID ping` with a bounded timeout, then select the non-loopback
+IPv4 address. Do not scan the LAN. On failure, report `qm status VMID` and tell
+the operator to inspect the PVE console; never wait forever.
+
+PVE currently generates a deprecated scalar `user` field in its NoCloud data.
+Debian 13 cloud-init therefore reports `extended_status: degraded done` and may
+return status code 2 even though `errors: []`. Automation must inspect
+`cloud-init status --long`: accept only this known deprecation with an empty
+`errors` list, and fail for any real or additional provisioning error.
 
 Before reusing an address, remove only that address from the dedicated
 known-hosts file:
@@ -341,33 +311,28 @@ ssh-keygen -f "$HOME/.cache/proxytools-build/known_hosts" -R VM_IP
 
 ## 9. Creating disposable release VMs
 
-The simplest reliable first implementation is a full `virt-clone`. It consumes
-more disk than a linked clone but does not risk coupling a running release VM
-to accidental template changes.
+Select an unused VMID and verify both its configuration path and intended name
+before creation. Linux clones are linked LVM-thin clones of protected template
+`9000`:
 
 ```bash
-sudo virt-clone \
-  --connect qemu:///system \
-  --original proxytools-linux-template \
-  --name proxytools-linux-vX.Y.Z \
-  --auto-clone
-
-sudo virt-clone \
-  --connect qemu:///system \
-  --original proxytools-windows-template \
-  --name proxytools-windows-vX.Y.Z \
-  --auto-clone
+ssh root@192.168.66.2 \
+  qm clone 9000 VMID --name proxytools-linux-vX.Y.Z --full 0
+ssh root@192.168.66.2 qm set VMID --protection 0
+ssh root@192.168.66.2 qm start VMID
 ```
 
-Once the manual process is proven, the automation may use qcow2 overlays for
-faster cloning. That optimization must preserve immutable backing images and
-must validate the resolved backing path before deleting an overlay.
+Do not pass `--storage` for a linked clone: PVE requires its overlay to remain
+on the template's thin storage. Template protection is inherited by clones, so
+immediately disable protection on the exact disposable VMID; otherwise cleanup
+will be blocked. Never disable protection on VMID `9000` during a build.
 
-Never clone a running or suspended template. Both templates must be shut off:
+Before cloning, require the template to be stopped and protected:
 
 ```bash
-virsh --connect qemu:///system domstate proxytools-linux-template
-virsh --connect qemu:///system domstate proxytools-windows-template
+ssh root@192.168.66.2 qm status 9000
+ssh root@192.168.66.2 qm config 9000 \
+  | grep -E '^(name|template|protection):'
 ```
 
 ## 10. Preparing a release source archive
@@ -394,8 +359,8 @@ git rev-parse HEAD
 git diff --check
 ```
 
-Create one archive and one checksum on the host, then send those exact files to
-both builders:
+Create one archive and one checksum on the development machine, then send those
+exact files to both builders:
 
 ```bash
 mkdir -p release/.work/current/source
@@ -409,8 +374,25 @@ git archive --format=tar.gz \
 )
 ```
 
-The archive excludes untracked local state by construction. Verify its checksum
-inside each guest before extracting it.
+The archive includes all committed release build/test scripts under `release/`
+and excludes untracked local state by construction. Verify its checksum inside
+each guest before extracting it. During infrastructure development, before the
+release scripts exist, `rsync` from the current worktree is acceptable for a
+disposable smoke clone:
+
+```bash
+rsync -a --delete \
+  --exclude=.git/ --exclude=.venv/ \
+  --exclude=proxydb/ --exclude=geodb/ \
+  --exclude='__pycache__/' --exclude='*.pyc' \
+  --exclude=release/.work/ \
+  -e 'ssh -i ~/.ssh/proxytools-build \
+    -o UserKnownHostsFile=~/.cache/proxytools-build/known_hosts' \
+  ./ builder@LINUX_IP:/home/builder/proxytools/
+```
+
+Do not use a dirty-worktree `rsync` transfer for a real release. A release uses
+the single clean archive so Linux and Windows receive byte-identical source.
 
 The repository currently has no frozen dependency lock or PyInstaller spec.
 Those must be introduced under `release/` before the first real standalone
@@ -575,7 +557,8 @@ release/.work/current/logs/
   windows-manifest.txt
 ```
 
-Generate `SHA256SUMS` on the Debian host only after both artifacts arrive:
+Generate `SHA256SUMS` on the development machine only after both artifacts
+arrive:
 
 ```bash
 cd release/.work/current/artifacts
@@ -663,40 +646,34 @@ successful logs are not archives; GitHub Release is their durable destination.
 
 ## 17. Safe VM destruction
 
-Resolve and inspect exact domain names before deleting anything:
+Resolve and inspect the exact PVE VMID and name before deleting anything:
 
 ```bash
-virsh --connect qemu:///system list --all
-virsh --connect qemu:///system domblklist proxytools-linux-vX.Y.Z
-virsh --connect qemu:///system domblklist proxytools-windows-vX.Y.Z
+ssh root@192.168.66.2 qm list
+ssh root@192.168.66.2 qm config VMID
 ```
 
-Then shut down the disposable guests. Use `destroy` only when a guest will not
-shut down and its loss is explicitly acceptable:
+Refuse cleanup if the resolved VM is a template, VMID `9000`, protected, or its
+name does not exactly match the expected disposable build name. Ask the guest
+to power off, then poll `qm status VMID` with a bounded timeout:
 
 ```bash
-virsh --connect qemu:///system shutdown proxytools-linux-vX.Y.Z
-virsh --connect qemu:///system shutdown proxytools-windows-vX.Y.Z
+ssh -i "$HOME/.ssh/proxytools-build" builder@VM_IP sudo poweroff
+ssh root@192.168.66.2 qm status VMID
 ```
 
-After confirming both are stopped, remove the disposable domains and their
-managed storage:
+After confirming `status: stopped`, remove that exact clone and its volumes:
 
 ```bash
-virsh --connect qemu:///system undefine \
-  proxytools-linux-vX.Y.Z --remove-all-storage
-virsh --connect qemu:///system undefine \
-  proxytools-windows-vX.Y.Z --remove-all-storage --nvram
+ssh root@192.168.66.2 qm destroy VMID --purge 1
+ssh-keygen \
+  -f "$HOME/.cache/proxytools-build/known_hosts" -R VM_IP
 ```
-
-Use `--nvram` only for a domain whose inspected definition contains an NVRAM
-file. It is typical for a UEFI Windows guest but may not exist for a BIOS Linux
-guest.
 
 Never substitute a glob, empty variable, template name, `/`, `$HOME`, or the
 repository root into a cleanup command. Future automation must require the
 `proxytools-{linux,windows}-vX.Y.Z` naming pattern, refuse template domains, and
-print resolved disks before deletion.
+print the resolved PVE configuration and disks before deletion.
 
 ## 18. What future automation must provide
 
@@ -712,10 +689,11 @@ release/
   linux/smoke.sh
   windows/build.ps1
   windows/smoke.ps1
-  vm/clone-linux.sh
-  vm/clone-windows.sh
+  pve/clone-linux.sh
+  pve/clone-windows.sh
+  pve/guest-ip.sh
+  pve/destroy.sh
   vm/wait-for-ssh.sh
-  vm/destroy.sh
   pyinstaller/proxytools.spec
   pyinstaller/hooks/
   host/collect-artifacts.sh

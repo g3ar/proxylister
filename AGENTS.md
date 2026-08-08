@@ -304,7 +304,8 @@ updates to `.gitignore`, cleanup code/tests, and user documentation.
 
 - `README.md` is detailed user documentation with use cases and examples.
 - `DEVELOPERS.md` contains internals and contributor guidance.
-- `BUILD.md` is the planned Debian 13 QEMU/KVM release-lab runbook.
+- `BUILD.md` is the active PVE release-lab runbook and future automation
+  specification.
 - Module docstrings at the top of scripts should explain what the file is, why
   it exists, and how it is used.
 - CLI `--help` output is derived from the corresponding module documentation
@@ -314,23 +315,46 @@ Update the appropriate documentation when behavior changes. Do not bury
 end-user instructions in the developer guide or implementation internals in
 the README.
 
-## Release/build decisions — currently postponed
+## Release/build lab
 
-Do not implement packaging or web/daemon work unless the user explicitly
-reactivates that task. Current development and intermediate testing stay on the
-existing `git clone` workflow.
+Release/build work is active, but implement it incrementally. Current
+development and intermediate testing still use the existing `git clone`
+workflow; frozen executables are produced only from an explicit clean release
+worktree after the packaging scripts and dependency locks exist.
 
-The agreed future standalone scope is:
+The build server is a Proxmox VE host reachable from the development machine as
+`root@192.168.66.2`. Preserve its existing host configuration. The provisioned
+Linux builder is:
 
-- native Linux x86_64 executable;
+- PVE VM template `9000`, named `proxytools-linux-template`;
+- Debian 13 stable amd64, 2 vCPU, 3 GiB RAM, 20 GiB thin disk;
+- stored on `local-lvm`, with QEMU Guest Agent and DHCP on `vmbr0`;
+- account `builder`, authenticated with the dedicated local key
+  `~/.ssh/proxytools-build`;
+- template protection enabled and automatic cloud-init package upgrades
+  disabled.
+
+Create an LVM-thin linked clone for each build, immediately disable protection
+on the clone, discover its address through the guest agent, and upload the
+entire current release source snapshot including the versioned build/test
+scripts. Build and test only inside the clone. After success, retrieve artifacts
+and logs, shut the clone down, validate its exact VMID/name, and delete it. Keep
+the template stopped and immutable between explicit maintenance sessions. A
+failed clone may be retained briefly for diagnosis. See `BUILD.md` for the
+commands, validation, and cleanup rules.
+
+The supported standalone scope is:
+
+- native Linux x86_64 executable targeting current stable/LTS distributions;
 - native Windows 10 x86_64 executable;
 - Selenium embedded unconditionally; browser external;
 - `README.md` beside each distributed binary;
 - external config and runtime data beside the binary;
 - clear error if that directory is not writable;
-- one VM-based workflow for both operating systems, no container/VM mixture;
-- ephemeral Linux and Windows QEMU/KVM builder clones controlled from Debian
-  13 through SSH/SCP;
+- one PVE VM-based workflow for both operating systems, no container/VM
+  mixture;
+- ephemeral Linux and Windows linked clones controlled from the development
+  machine through the PVE API/SSH and guest SSH/SCP/rsync;
 - cross-platform process locking with `portalocker` before Windows packaging;
 - embedded defaults that create external `proxytools.conf` on first run.
 
