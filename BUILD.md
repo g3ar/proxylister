@@ -26,7 +26,7 @@ The remote lab is not a requirement for a code contribution or pull request.
 | Debian 13 PVE template | Provisioned and validated |
 | Ubuntu 24.04 LTS compatibility template | Provisioned and validated |
 | Clean-PVE template bootstrap | Implemented |
-| Automated remote Linux build | Not implemented |
+| Automated PVE Linux build/test | Implemented |
 | Windows template and build | Deferred to a separate later stage |
 | Release publishing automation | Not implemented |
 

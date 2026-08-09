@@ -366,6 +366,16 @@ and networking, verifies official cloud-image checksums, never replaces an
 occupied VMID/image automatically, and retains failed provisioning state for
 diagnosis. Keep its invariants synchronized with `BUILD_REMOTE.md` and the
 actual template contract.
+`release/pve/build.sh` is the implemented maintainer build/test orchestrator.
+It builds the current worktree in a disposable Debian clone, validates the same
+artifact through offline and live smoke in Ubuntu, retrieves artifacts/logs,
+deletes only successful exact clones, and retains the active clone on failure.
+Its generated state belongs under `release/.work/pve-linux/`; the artifact is
+promoted to `release/bin/` only after both OS gates pass.
+Before a new run, it must reconcile clones retained by previous failures: only
+exact unprotected non-template names `proxytools-debian-build-VMID` and
+`proxytools-ubuntu-validation-VMID` may be shut down and deleted automatically.
+Never weaken these guards or allow stale clones to accumulate across reruns.
 
 Root access to the PVE host is intentionally delegated for project build-lab
 work. Within an explicitly requested task, creating, configuring, starting,

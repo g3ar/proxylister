@@ -2,8 +2,8 @@
 
 This optional maintainer-only layer covers the project's isolated Linux build
 environment on Proxmox VE. It is not required for contributors, local testing,
-or pull requests. The base template is operational; automated clone, transfer,
-build, collection, and cleanup scripts are not implemented yet.
+or pull requests. The templates and automated clone, transfer, build,
+cross-distribution validation, collection, and cleanup workflow are operational.
 
 The remote workflow will run the same `release/linux/build.sh` and
 `release/linux/smoke.sh` documented in `BUILD_LOCAL.md`. It must not grow a
@@ -142,8 +142,8 @@ exact clone after a clean shutdown.
 
 ## Manual linked-clone lifecycle
 
-The following documents the proven manual mechanism. It is not yet packaged as
-release automation.
+The following documents the mechanism used by the automated workflow and is
+useful for diagnosis or explicit template maintenance.
 
 Choose an unused VMID and an exact disposable name. Verify the build template
 first:
@@ -186,12 +186,58 @@ cloud-init error fails provisioning.
 
 ## Source transfer and build
 
+The normal maintainer command from the development checkout is:
+
+```bash
+./release/pve/build.sh
+```
+
+It accepts the current worktree, including uncommitted development changes.
+At startup its local cleanup removes only the previous
+`release/.work/pve-linux/` and `release/bin/`. It also finds PVE clones left by
+earlier failed runs using the exact
+owned names `proxytools-debian-build-VMID` and
+`proxytools-ubuntu-validation-VMID`, validates their VMID, name, non-template
+state, and disabled protection, then shuts them down and deletes them before
+creating new work. It then:
+
+1. validates protected templates `9000` and `9001`;
+2. builds and tests in a disposable Debian linked clone;
+3. runs Debian live smoke and retrieves the artifact and full logs;
+4. deletes the successful Debian clone;
+5. runs the same artifact through offline and live smoke in a disposable
+   Ubuntu 24.04 linked clone;
+6. deletes the successful Ubuntu clone;
+7. promotes the verified artifact set to `release/bin/`.
+
+Logs are retained under `release/.work/pve-linux/logs/{debian,ubuntu}/`. On a
+failure, the current clone and available diagnostics are retained and its exact
+VMID, name, and IP are printed. Previously successful stages may already have
+been cleaned because their artifacts and logs are safely back on the
+development machine. The retained failed clone is automatically reconciled at
+the beginning of the next run; unrelated VMs, protected VMs, templates, and
+owned-looking names that do not end in their exact VMID are never deleted.
+
+Connection defaults may be changed without editing the script:
+
+```bash
+PROXYTOOLS_PVE_HOST=root@PVE_HOST \
+PROXYTOOLS_PVE_ROOT_KEY=/path/to/pve-root-key \
+PROXYTOOLS_PVE_GUEST_KEY=/path/to/proxytools-build-key \
+  ./release/pve/build.sh
+```
+
+The default PVE host is `root@192.168.66.2`; default keys are
+`~/.ssh/id_rsa` for the host and `~/.ssh/proxytools-build` for guests. The
+script keeps ephemeral guest host keys in its ignored `.work` directory and
+handles DHCP address reuse between successive clones.
+
 During infrastructure development, the current worktree can be copied to a
 disposable clone for smoke testing:
 
 ```bash
 rsync -a --delete \
-  --exclude=.git/ --exclude=.venv/ \
+  --exclude=.venv/ --exclude=.git/index.lock \
   --exclude=proxydb/ --exclude=geodb/ \
   --exclude='__pycache__/' --exclude='*.pyc' \
   --exclude=release/.work/ \
@@ -207,13 +253,13 @@ cd /home/builder/proxytools
 ./release/linux/build.sh
 ```
 
-A real release must not use a dirty-worktree rsync. Future orchestration must
-create one clean, checksummed source archive from the release worktree, upload
-it, verify it inside the clone, run the committed build script, retrieve the
-`proxytools` artifact, user `README.md`, MIT `LICENSE`, `MANIFEST.txt`,
-`SHA256SUMS`, and full logs, then independently verify returned checksums. The optional live smoke may
-run in the clone as a separate network-dependent release gate; it must remain
-distinct from the deterministic build result.
+A real release must not use a dirty-worktree rsync. Its future publication
+layer must create one clean, checksummed source archive from the release
+worktree and verify it inside the clone before invoking this build/test layer.
+The current orchestrator already retrieves the `proxytools` artifact, user
+`README.md`, MIT `LICENSE`, `MANIFEST.txt`, `SHA256SUMS`, and full logs, then
+independently verifies returned checksums. Live smoke remains a separate
+network-dependent gate from the deterministic build result.
 
 ## Safe cleanup
 
@@ -240,20 +286,10 @@ ssh-keygen \
 Never use a glob, empty variable, template name, repository path, `/`, or
 `$HOME` as a cleanup target.
 
-## Next remote stage
+## Remaining remote release work
 
-The next implementation is Linux-only orchestration:
-
-```text
-validate template and choose VMID
-  -> create and unprotect linked clone
-  -> wait for guest agent and SSH
-  -> upload one clean source snapshot
-  -> run the existing Linux build script
-  -> retrieve and verify artifacts and logs
-  -> delete a successful clone
-```
-
-It must use bounded waits, stop on the first failed gate, retain a useful failed
-clone only for diagnosis, and never store private keys in Git. Windows remains
-out of scope until this Linux flow is complete.
+The implemented orchestrator is a development build/test workflow and records
+dirty source honestly in `MANIFEST.txt`. A publishable release still needs the
+separate clean release-worktree policy: one immutable checksummed source
+snapshot, explicit release intent, and publication/tagging only after all
+native platform gates pass. Windows remains a separate later stage.
