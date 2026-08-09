@@ -30,6 +30,48 @@ Run Linux and future Windows builders sequentially on this host. Use PVE's
 `qm` and `pvesm`; do not install a second libvirt stack and do not use LXC for
 native release builds.
 
+## Rebuild or migrate the PVE build lab
+
+The versioned bootstrap script recreates the Linux template layer on a clean
+PVE host:
+
+```bash
+scp release/pve/provision-host.sh root@PVE_HOST:/root/
+scp ~/.ssh/proxytools-build.pub root@PVE_HOST:/root/
+ssh root@PVE_HOST \
+  /root/provision-host.sh \
+    --ssh-public-key /root/proxytools-build.pub
+```
+
+Before running it, install PVE normally and configure these host resources:
+
+- `local` directory storage with `iso`, `snippets`, and `import` content;
+- `local-lvm` storage for VM disks;
+- `vmbr0` with DHCP connectivity for guests.
+
+Those installer- and site-specific storage/network decisions are deliberately
+not rewritten by the project script. The bootstrap validates them, downloads
+the current official Debian 13 and Ubuntu 24.04 release cloud images, checks
+their published SHA-512/SHA-256 values, installs the required guest packages,
+cleans per-instance cloud-init and SSH identity, and creates protected stopped
+templates `9000` and `9001`. Each newly created template must also boot one
+automatically selected disposable linked clone, pass guest-agent, cloud-init,
+OS/tool checks, shut down, and clean up that exact clone.
+
+The script is safe to rerun: exact valid templates are checked and left alone.
+It never replaces an occupied VMID or an existing image with a bad/currently
+different checksum. A failed provisioning VM is retained intact for diagnosis.
+Check an existing host without downloading or creating anything with:
+
+```bash
+ssh root@PVE_HOST /root/provision-host.sh --check-only
+```
+
+The public guest key may be copied to the PVE host temporarily; never copy its
+private half. Remove the temporary public-key copy after successful bootstrap
+if it is not otherwise useful. Official cloud images remain cached under
+`/var/lib/vz/template/iso/` for recovery and deliberate template maintenance.
+
 ## Linux template
 
 The protected template is:
@@ -92,10 +134,11 @@ set, verify `SHA256SUMS`, and exercise the binary there. The initial validation
 successfully ran the Debian 13-built executable on Ubuntu 24.04 with glibc
 2.39, including `--version`, `--about`, and help for both modes.
 
-Never boot template `9001` directly. Its cloud-init vendor data is stored as
-`local:snippets/proxytools-ubuntu-2404-check-vendor.yaml`. Validate changes
-through an unprotected disposable linked clone and delete only that exact clone
-after a clean shutdown.
+Never boot template `9001` directly. The current host may retain provisioning
+vendor data under `local:snippets/`; the bootstrap script uses temporary vendor
+data only while baking packages and detaches it before templating. Validate
+changes through an unprotected disposable linked clone and delete only that
+exact clone after a clean shutdown.
 
 ## Manual linked-clone lifecycle
 

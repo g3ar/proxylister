@@ -360,6 +360,12 @@ Ubuntu 24.04 LTS compatibility template `9001` is also stopped, protected, and
 immutable. It is for running the returned standalone artifact in a disposable
 linked clone, not for producing a second Linux build. Never boot or delete
 either base template directly.
+`release/pve/provision-host.sh` is the authoritative clean-host bootstrap for
+these templates. It validates rather than rewrites site-specific PVE storage
+and networking, verifies official cloud-image checksums, never replaces an
+occupied VMID/image automatically, and retains failed provisioning state for
+diagnosis. Keep its invariants synchronized with `BUILD_REMOTE.md` and the
+actual template contract.
 
 Root access to the PVE host is intentionally delegated for project build-lab
 work. Within an explicitly requested task, creating, configuring, starting,
