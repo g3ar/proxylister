@@ -58,6 +58,11 @@ templates `9000` and `9001`. Each newly created template must also boot one
 automatically selected disposable linked clone, pass guest-agent, cloud-init,
 OS/tool checks, shut down, and clean up that exact clone.
 
+Provisioning also enables LVM thin-pool automatic growth at 80% usage in 20%
+increments and restarts its monitor. Before changing `/etc/lvm/lvm.conf`, it
+keeps a timestamped copy beside that file. The volume group must retain free
+extents for automatic growth to work.
+
 The script is safe to rerun: exact valid templates are checked and left alone.
 It never replaces an occupied VMID or an existing image with a bad/currently
 different checksum. A failed provisioning VM is retained intact for diagnosis.
@@ -192,6 +197,11 @@ The normal maintainer command from the development checkout is:
 ./release/pve/build.sh
 ```
 
+The build driver and host provisioning share one kernel lock on the PVE host.
+Only one build or provisioning operation can own the lab at a time; a second
+invocation exits before deleting local output, logs, or VMs. The lock follows
+the owning SSH process and is released automatically if that process exits.
+
 It accepts the current worktree, including uncommitted development changes.
 At startup its local cleanup removes only the previous
 `release/.work/pve-linux/` and `release/bin/`. It also finds PVE clones left by
@@ -232,6 +242,12 @@ The default PVE host is `root@192.168.66.2`; default keys are
 script keeps ephemeral guest host keys in its ignored `.work` directory and
 handles DHCP address reuse between successive clones.
 
+Offline destructive-guard regressions are available with:
+
+```bash
+./tests/test_pve_build.sh
+```
+
 During infrastructure development, the current worktree can be copied to a
 disposable clone for smoke testing:
 
@@ -253,10 +269,18 @@ cd /home/builder/proxytools
 ./release/linux/build.sh
 ```
 
-A real release must not use a dirty-worktree rsync. Its future publication
-layer must create one clean, checksummed source archive from the release
-worktree and verify it inside the clone before invoking this build/test layer.
-The current orchestrator already retrieves the `proxytools` artifact, user
+A release candidate uses the explicit clean-snapshot mode:
+
+```bash
+./release/pve/build.sh --release
+```
+
+It refuses tracked or untracked worktree changes before local cleanup, creates
+one `git archive` from `HEAD`, records its SHA-256 value, and verifies that
+archive independently inside both guests before extraction. The embedded and
+manifest source commit comes from that archive and its tree state is `clean`.
+The normal no-option command intentionally remains the dirty-worktree-capable
+development path. The orchestrator retrieves the `proxytools` artifact, user
 `README.md`, MIT `LICENSE`, `MANIFEST.txt`, `SHA256SUMS`, and full logs, then
 independently verifies returned checksums. Live smoke remains a separate
 network-dependent gate from the deterministic build result.
@@ -286,10 +310,17 @@ ssh-keygen \
 Never use a glob, empty variable, template name, repository path, `/`, or
 `$HOME` as a cleanup target.
 
+## Recovery-drill evidence
+
+The bootstrap was exercised from an empty Debian 13 VM converted to nested PVE
+9.2.10 with KVM, isolated DHCP/NAT, `local`, and a dedicated `local-lvm` thin
+pool. It created both templates, booted and removed both validation clones, and
+then passed a second `--check-only` run without changing either template. The
+outer drill VM and all of its virtual disks were deleted after success; it is
+test evidence, not another persistent build host or template.
+
 ## Remaining remote release work
 
-The implemented orchestrator is a development build/test workflow and records
-dirty source honestly in `MANIFEST.txt`. A publishable release still needs the
-separate clean release-worktree policy: one immutable checksummed source
-snapshot, explicit release intent, and publication/tagging only after all
-native platform gates pass. Windows remains a separate later stage.
+Publication and tagging still wait for the Windows native build stage. Both
+platforms must consume the same clean snapshot and pass their native gates
+before release publication. Windows remains a separate later stage.

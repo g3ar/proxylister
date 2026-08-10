@@ -328,8 +328,8 @@ Release/build work is active and split into two explicit Linux workflows. The
 local workflow in `BUILD_LOCAL.md` is the normal contributor path and is
 implemented. PVE access is never required for ordinary development, fixes,
 tests, reviews, or pull requests. The remote workflow in `BUILD_REMOTE.md` is
-an additional maintainer release layer: it has a provisioned Debian template,
-but its orchestration is not implemented. Read the relevant runbook before
+an additional maintainer release layer with implemented Debian build and Ubuntu
+compatibility orchestration. Read the relevant runbook before
 build work; do not merge local and remote operator instructions back into one
 document.
 
@@ -372,6 +372,11 @@ artifact through offline and live smoke in Ubuntu, retrieves artifacts/logs,
 deletes only successful exact clones, and retains the active clone on failure.
 Its generated state belongs under `release/.work/pve-linux/`; the artifact is
 promoted to `release/bin/` only after both OS gates pass.
+Its normal mode transfers the current worktree for development. Its explicit
+`--release` mode requires a completely clean worktree, creates one checksummed
+`git archive` from `HEAD`, and verifies that same archive in both guests.
+Build and host provisioning share a PVE-side kernel lock; a contender must exit
+before cleaning local state or touching VMs.
 Before a new run, it must reconcile clones retained by previous failures: only
 exact unprotected non-template names `proxytools-debian-build-VMID` and
 `proxytools-ubuntu-validation-VMID` may be shut down and deleted automatically.

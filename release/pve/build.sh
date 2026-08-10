@@ -13,6 +13,8 @@ BIN="$ROOT/release/bin"
 ARTIFACTS="$WORK/artifacts"
 LOGS="$WORK/logs"
 KNOWN_HOSTS="$WORK/known_hosts"
+SOURCE_ARCHIVE="$WORK/source.tar"
+SOURCE_CHECKSUM="$WORK/source.tar.sha256"
 
 PVE_HOST=${PROXYTOOLS_PVE_HOST:-root@192.168.66.2}
 PVE_ROOT_KEY=${PROXYTOOLS_PVE_ROOT_KEY:-$HOME/.ssh/id_rsa}
@@ -26,22 +28,17 @@ ACTIVE_VMID=
 ACTIVE_NAME=
 ACTIVE_IP=
 ACTIVE_STAGE=
+PVE_LOCK_PID=
+PVE_LOCK_FD=
+RUN_STARTED=0
+RELEASE_MODE=0
+SOURCE_COMMIT=
+SOURCE_TREE=
 
 fail() {
     printf 'pve-build: %s\n' "$*" >&2
     exit 1
 }
-
-for command in awk git grep rsync sed sha256sum ssh ssh-keygen; do
-    command -v "$command" >/dev/null || fail "required command not found: $command"
-done
-[[ -f "$PVE_ROOT_KEY" ]] || fail "PVE root key not found: $PVE_ROOT_KEY"
-[[ -f "$GUEST_KEY" ]] || fail "guest key not found: $GUEST_KEY"
-
-rm -rf -- "$WORK" "$BIN"
-mkdir -p -- "$ARTIFACTS" "$LOGS/debian" "$LOGS/ubuntu"
-touch "$KNOWN_HOSTS"
-chmod 0600 "$KNOWN_HOSTS"
 
 PVE_SSH=(
     ssh -n -F /dev/null -i "$PVE_ROOT_KEY"
@@ -50,8 +47,44 @@ PVE_SSH=(
     -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
 )
 
+PVE_LOCK_SSH=(
+    ssh -F /dev/null -i "$PVE_ROOT_KEY"
+    -o BatchMode=yes -o ConnectTimeout=10
+    -o StrictHostKeyChecking=yes
+    -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+)
+
 pve() {
     "${PVE_SSH[@]}" "$PVE_HOST" "$@"
+}
+
+acquire_pve_lock() {
+    local response
+
+    coproc PVE_LOCK_PROCESS {
+        "${PVE_LOCK_SSH[@]}" "$PVE_HOST" \
+            'exec 9>/run/lock/proxytools-pve-build.lock; flock -n 9 || exit 73; printf "pid=%s started=%s\n" "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&9; printf "LOCKED\n"; cat >/dev/null'
+    }
+    PVE_LOCK_PID=$PVE_LOCK_PROCESS_PID
+    if ! read -r -t 15 response <&"${PVE_LOCK_PROCESS[0]}" \
+            || [[ "$response" != LOCKED ]]; then
+        wait "$PVE_LOCK_PID" 2>/dev/null || true
+        PVE_LOCK_PID=
+        fail 'another PVE build/provision operation already owns the build-lab lock'
+    fi
+    exec {PVE_LOCK_FD}>&"${PVE_LOCK_PROCESS[1]}"
+    exec {PVE_LOCK_PROCESS[0]}>&-
+    exec {PVE_LOCK_PROCESS[1]}>&-
+    printf 'Acquired PVE build-lab lock.\n'
+}
+
+release_pve_lock() {
+    [[ -n "$PVE_LOCK_FD" ]] || return 0
+    exec {PVE_LOCK_FD}>&-
+    wait "$PVE_LOCK_PID" 2>/dev/null || true
+    PVE_LOCK_FD=
+    PVE_LOCK_PID=
+    printf 'Released PVE build-lab lock.\n'
 }
 
 guest_rsh() {
@@ -187,7 +220,7 @@ retrieve_active_logs() {
 
 on_exit() {
     local status=$?
-    if (( status != 0 )); then
+    if (( status != 0 && RUN_STARTED )); then
         set +e
         if [[ -n "$ACTIVE_VMID" ]]; then
             retrieve_active_logs "$LOGS/failed-$ACTIVE_VMID"
@@ -198,6 +231,7 @@ on_exit() {
         fi
         printf 'pve-build: diagnostics retained in %s\n' "$WORK" >&2
     fi
+    release_pve_lock
 }
 trap on_exit EXIT
 
@@ -270,13 +304,38 @@ transfer_worktree() {
         "$ROOT/" "builder@$ip:/home/builder/proxytools/"
 }
 
+prepare_release_source() {
+    [[ -z "$(git status --porcelain)" ]] \
+        || fail 'release mode requires a clean worktree, including no untracked files'
+    git archive --format=tar --output="$SOURCE_ARCHIVE" HEAD
+    (
+        cd "$WORK"
+        sha256sum "$(basename "$SOURCE_ARCHIVE")" >"$(basename "$SOURCE_CHECKSUM")"
+    )
+}
+
+transfer_source() {
+    local ip=$1 rsh
+    if (( ! RELEASE_MODE )); then
+        transfer_worktree "$ip"
+        return
+    fi
+
+    rsh=$(guest_rsh)
+    guest "$ip" 'rm -rf /home/builder/proxytools && mkdir -p /home/builder/proxytools'
+    rsync -a -e "$rsh" "$SOURCE_ARCHIVE" "$SOURCE_CHECKSUM" \
+        "builder@$ip:/home/builder/"
+    guest "$ip" \
+        'set -eu; cd /home/builder; sha256sum -c source.tar.sha256; tar -xf source.tar -C proxytools'
+}
+
 run_debian_build() {
     local ip=$1 rsh
     rsh=$(guest_rsh)
-    transfer_worktree "$ip"
+    transfer_source "$ip"
 
     if ! guest "$ip" \
-            'cd /home/builder/proxytools && ./release/linux/build.sh' \
+            "cd /home/builder/proxytools && PROXYTOOLS_SOURCE_COMMIT=$SOURCE_COMMIT PROXYTOOLS_SOURCE_TREE=$SOURCE_TREE ./release/linux/build.sh" \
             >"$LOGS/debian/driver-build.log" 2>&1; then
         tail -n 120 "$LOGS/debian/driver-build.log" >&2
         fail 'Debian build gate failed'
@@ -299,7 +358,7 @@ run_debian_build() {
 run_ubuntu_validation() {
     local ip=$1 rsh
     rsh=$(guest_rsh)
-    transfer_worktree "$ip"
+    transfer_source "$ip"
     guest "$ip" 'mkdir -p /home/builder/proxytools/release/bin'
     rsync -a --delete -e "$rsh" \
         "$ARTIFACTS/" "builder@$ip:/home/builder/proxytools/release/bin/"
@@ -315,21 +374,72 @@ run_ubuntu_validation() {
         "$LOGS/ubuntu/"
 }
 
-cd "$ROOT"
-git rev-parse --show-toplevel >/dev/null
-validate_template "$DEBIAN_TEMPLATE" "$DEBIAN_TEMPLATE_NAME"
-validate_template "$UBUNTU_TEMPLATE" "$UBUNTU_TEMPLATE_NAME"
-cleanup_stale_clones
+main() {
+    local command
 
-create_clone "$DEBIAN_TEMPLATE" proxytools-debian-build debian
-run_debian_build "$ACTIVE_IP"
-cleanup_active_clone
+    while (( $# )); do
+        case "$1" in
+            --release)
+                RELEASE_MODE=1
+                shift
+                ;;
+            -h|--help)
+                printf 'Usage: %s [--release]\n' "$0"
+                return
+                ;;
+            *)
+                fail "unknown argument: $1"
+                ;;
+        esac
+    done
 
-create_clone "$UBUNTU_TEMPLATE" proxytools-ubuntu-validation ubuntu
-run_ubuntu_validation "$ACTIVE_IP"
-cleanup_active_clone
+    for command in awk git grep rsync sed sha256sum ssh ssh-keygen; do
+        command -v "$command" >/dev/null \
+            || fail "required command not found: $command"
+    done
+    [[ -f "$PVE_ROOT_KEY" ]] || fail "PVE root key not found: $PVE_ROOT_KEY"
+    [[ -f "$GUEST_KEY" ]] || fail "guest key not found: $GUEST_KEY"
 
-mv -- "$ARTIFACTS" "$BIN"
-trap - EXIT
-printf 'PVE Linux artifact: %s\n' "$BIN/proxytools"
-printf 'PVE logs: %s\n' "$LOGS"
+    cd "$ROOT"
+    git rev-parse --show-toplevel >/dev/null
+    SOURCE_COMMIT=$(git rev-parse HEAD)
+    if [[ -z "$(git status --porcelain)" ]]; then
+        SOURCE_TREE=clean
+    else
+        SOURCE_TREE=dirty
+    fi
+    acquire_pve_lock
+    if (( RELEASE_MODE )); then
+        [[ "$SOURCE_TREE" == clean ]] \
+            || fail 'release mode requires a clean worktree, including no untracked files'
+    fi
+    rm -rf -- "$WORK" "$BIN"
+    mkdir -p -- "$ARTIFACTS" "$LOGS/debian" "$LOGS/ubuntu"
+    touch "$KNOWN_HOSTS"
+    chmod 0600 "$KNOWN_HOSTS"
+    if (( RELEASE_MODE )); then
+        prepare_release_source
+    fi
+    RUN_STARTED=1
+    validate_template "$DEBIAN_TEMPLATE" "$DEBIAN_TEMPLATE_NAME"
+    validate_template "$UBUNTU_TEMPLATE" "$UBUNTU_TEMPLATE_NAME"
+    cleanup_stale_clones
+
+    create_clone "$DEBIAN_TEMPLATE" proxytools-debian-build debian
+    run_debian_build "$ACTIVE_IP"
+    cleanup_active_clone
+
+    create_clone "$UBUNTU_TEMPLATE" proxytools-ubuntu-validation ubuntu
+    run_ubuntu_validation "$ACTIVE_IP"
+    cleanup_active_clone
+
+    mv -- "$ARTIFACTS" "$BIN"
+    release_pve_lock
+    trap - EXIT
+    printf 'PVE Linux artifact: %s\n' "$BIN/proxytools"
+    printf 'PVE logs: %s\n' "$LOGS"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

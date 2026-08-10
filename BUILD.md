@@ -27,6 +27,10 @@ The remote lab is not a requirement for a code contribution or pull request.
 | Ubuntu 24.04 LTS compatibility template | Provisioned and validated |
 | Clean-PVE template bootstrap | Implemented |
 | Automated PVE Linux build/test | Implemented |
+| PVE-wide build/provision lock | Implemented |
+| PVE destructive-guard shell tests | Implemented |
+| PVE LVM thin-pool autoextend | Implemented |
+| Clean checksummed PVE source snapshot | Implemented (`--release`) |
 | Windows template and build | Deferred to a separate later stage |
 | Release publishing automation | Not implemented |
 

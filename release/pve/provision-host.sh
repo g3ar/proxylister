@@ -17,6 +17,7 @@ SNIPPET_DIR=/var/lib/vz/snippets
 SSH_PUBLIC_KEY=
 CHECK_ONLY=0
 ACTIVE_VMID=
+LOCK_FILE=/run/lock/proxytools-pve-build.lock
 
 usage() {
     cat <<'EOF'
@@ -75,9 +76,41 @@ done
 
 (( EUID == 0 )) || fail 'run this script as root on the PVE host'
 
-for command in curl ip pvesh pvesm qm qemu-img sha256sum sha512sum; do
+for command in curl flock ip lvmconfig pvesh pvesm qm qemu-img sha256sum sha512sum; do
     command -v "$command" >/dev/null || fail "required command not found: $command"
 done
+
+exec 9>"$LOCK_FILE"
+flock -n 9 \
+    || fail 'another PVE build/provision operation already owns the build-lab lock'
+printf 'pid=%s started=%s\n' "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&9
+
+configure_thin_pool_autoextend() {
+    local threshold percent backup
+
+    threshold=$(lvmconfig --type full activation/thin_pool_autoextend_threshold 9>&- \
+        | sed 's/.*=//')
+    percent=$(lvmconfig --type full activation/thin_pool_autoextend_percent 9>&- \
+        | sed 's/.*=//')
+    if [[ "$threshold" == 80 && "$percent" == 20 ]]; then
+        return
+    fi
+
+    backup="/etc/lvm/lvm.conf.proxytools.$(date -u +%Y%m%dT%H%M%SZ)"
+    cp -a /etc/lvm/lvm.conf "$backup"
+    sed -i '/^activation {/a\
+\tthin_pool_autoextend_threshold = 80\
+\tthin_pool_autoextend_percent = 20' /etc/lvm/lvm.conf
+    if ! lvmconfig --validate 9>&-; then
+        cp -a "$backup" /etc/lvm/lvm.conf
+        fail 'invalid LVM configuration; restored the original file'
+    fi
+    systemctl restart lvm2-monitor.service
+    printf 'Configured LVM thin-pool autoextend (80%% threshold, 20%% growth); backup: %s\n' \
+        "$backup"
+}
+
+configure_thin_pool_autoextend
 
 pveversion >/dev/null || fail 'this does not appear to be a Proxmox VE host'
 pvesm status --storage local | grep -q '^local[[:space:]]' \
@@ -138,7 +171,8 @@ verified_image() {
     local sums temporary expected actual
 
     sums=$(mktemp "$IMAGE_DIR/.proxytools-sums.XXXXXX")
-    curl -fL --retry 5 --output "$sums" "$sums_url"
+    curl -fL --retry 5 --output "$sums" "$sums_url" \
+        || fail "could not download official checksum list: $sums_url"
     expected=$(checksum_for "$sums" "$filename") \
         || fail "official checksum list does not contain $filename"
 
@@ -152,7 +186,8 @@ verified_image() {
     fi
 
     temporary="$target.download.$$"
-    curl -fL --retry 5 --output "$temporary" "$url"
+    curl -fL --retry 5 --output "$temporary" "$url" \
+        || fail "could not download cloud image; partial file retained as $temporary"
     actual=$("${algorithm}sum" "$temporary" | awk '{print $1}')
     rm -f -- "$sums"
     if [[ "$actual" != "$expected" ]]; then

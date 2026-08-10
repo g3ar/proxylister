@@ -36,7 +36,22 @@ grep -Ev '^[[:space:]]*(#|$)' "$CONSTRAINTS" \
 diff -u "$WORK/expected-packages.txt" "$WORK/resolved-packages.txt"
 
 BUILD_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-SOURCE_COMMIT=$(git rev-parse HEAD)
+SOURCE_COMMIT=${PROXYTOOLS_SOURCE_COMMIT:-$(git rev-parse HEAD)}
+SOURCE_TREE=${PROXYTOOLS_SOURCE_TREE:-}
+if test -z "$SOURCE_TREE"; then
+    if test -n "$(git status --porcelain)"; then
+        SOURCE_TREE=dirty
+    else
+        SOURCE_TREE=clean
+    fi
+fi
+case "$SOURCE_TREE" in
+    clean|dirty) ;;
+    *)
+        printf 'Invalid source tree state: %s\n' "$SOURCE_TREE" >&2
+        exit 1
+        ;;
+esac
 PROXYTOOLS_BUILD_INFO="$WORK/proxytools-build.txt"
 export PROXYTOOLS_BUILD_INFO
 {
@@ -75,11 +90,7 @@ ARTIFACT=proxytools
     printf 'artifact=%s\n' "$ARTIFACT"
     printf 'version=%s\n' "$VERSION"
     printf 'source_commit=%s\n' "$SOURCE_COMMIT"
-    if test -n "$(git status --porcelain)"; then
-        printf 'source_tree=dirty\n'
-    else
-        printf 'source_tree=clean\n'
-    fi
+    printf 'source_tree=%s\n' "$SOURCE_TREE"
     printf 'build_utc=%s\n' "$BUILD_UTC"
     printf 'os=%s\n' "$(. /etc/os-release; printf '%s' "$PRETTY_NAME")"
     printf 'architecture=%s\n' "$(uname -m)"
