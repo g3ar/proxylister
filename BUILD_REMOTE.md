@@ -59,9 +59,10 @@ automatically selected disposable linked clone, pass guest-agent, cloud-init,
 OS/tool checks, shut down, and clean up that exact clone.
 
 Provisioning also enables LVM thin-pool automatic growth at 80% usage in 20%
-increments and restarts its monitor. Before changing `/etc/lvm/lvm.conf`, it
-keeps a timestamped copy beside that file. The volume group must retain free
-extents for automatic growth to work.
+increments and restarts its monitor. It replaces any active values with one
+marked Proxy Tools block, validates the effective values after writing, and
+keeps a timestamped copy of `/etc/lvm/lvm.conf` beside that file. The volume
+group must retain free extents for automatic growth to work.
 
 The script is safe to rerun: exact valid templates are checked and left alone.
 It never replaces an occupied VMID or an existing image with a bad/currently
@@ -71,6 +72,11 @@ Check an existing host without downloading or creating anything with:
 ```bash
 ssh root@PVE_HOST /root/provision-host.sh --check-only
 ```
+
+`--check-only` is strictly read-only. It validates that thin-pool autoextend is
+already set to `80/20` along with storage, bridge, and template invariants; it
+never repairs configuration, downloads images, creates VMs, or restarts a
+service.
 
 The public guest key may be copied to the PVE host temporarily; never copy its
 private half. Remove the temporary public-key copy after successful bootstrap
@@ -197,10 +203,12 @@ The normal maintainer command from the development checkout is:
 ./release/pve/build.sh
 ```
 
-The build driver and host provisioning share one kernel lock on the PVE host.
-Only one build or provisioning operation can own the lab at a time; a second
+The build driver and mutating host provisioning share one kernel lock on the
+PVE host. Only one build or provisioning operation can own the lab at a time; a second
 invocation exits before deleting local output, logs, or VMs. The lock follows
 the owning SSH process and is released automatically if that process exits.
+The strictly read-only `--check-only` validation does not create or update the
+lock file.
 
 It accepts the current worktree, including uncommitted development changes.
 At startup its local cleanup removes only the previous
@@ -245,7 +253,8 @@ handles DHCP address reuse between successive clones.
 Offline destructive-guard regressions are available with:
 
 ```bash
-./tests/test_pve_build.sh
+./release/pve/test_pve_build.sh
+./release/pve/test_provision_host.sh
 ```
 
 During infrastructure development, the current worktree can be copied to a

@@ -11,10 +11,12 @@ The default mode is `list`, so `./proxytools` works immediately after cloning.
 
 ## Quick start with a downloaded binary
 
-Download the Linux archive from the project's GitHub Releases page, extract
-all of its files into one directory, then run:
+Download the Linux archive and its checksum file from the project's
+[GitHub Releases](https://github.com/g3ar/proxylister/releases) page, extract
+all files into one directory, verify them, then run:
 
 ```bash
+sha256sum -c SHA256SUMS
 chmod +x proxytools
 ./proxytools
 ```
@@ -41,7 +43,7 @@ Requirements:
 Clone the project and run it:
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/g3ar/proxylister.git
 cd proxylister
 ./proxytools
 ```

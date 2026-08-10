@@ -80,37 +80,79 @@ for command in curl flock ip lvmconfig pvesh pvesm qm qemu-img sha256sum sha512s
     command -v "$command" >/dev/null || fail "required command not found: $command"
 done
 
-exec 9>"$LOCK_FILE"
-flock -n 9 \
-    || fail 'another PVE build/provision operation already owns the build-lab lock'
-printf 'pid=%s started=%s\n' "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&9
+if (( ! CHECK_ONLY )); then
+    exec 9>"$LOCK_FILE"
+    flock -n 9 \
+        || fail 'another PVE build/provision operation already owns the build-lab lock'
+    printf 'pid=%s started=%s\n' "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&9
+fi
 
-configure_thin_pool_autoextend() {
-    local threshold percent backup
+thin_pool_autoextend_values() {
+    local threshold percent
 
     threshold=$(lvmconfig --type full activation/thin_pool_autoextend_threshold 9>&- \
         | sed 's/.*=//')
     percent=$(lvmconfig --type full activation/thin_pool_autoextend_percent 9>&- \
         | sed 's/.*=//')
-    if [[ "$threshold" == 80 && "$percent" == 20 ]]; then
-        return
-    fi
+    printf '%s %s\n' "$threshold" "$percent"
+}
+
+validate_thin_pool_autoextend() {
+    local values
+
+    values=$(thin_pool_autoextend_values)
+    [[ "$values" == '80 20' ]] \
+        || fail 'LVM thin-pool autoextend must use threshold 80 and growth 20'
+}
+
+configure_thin_pool_autoextend() {
+    local values backup temporary
+
+    values=$(thin_pool_autoextend_values)
+    [[ "$values" == '80 20' ]] && return
 
     backup="/etc/lvm/lvm.conf.proxytools.$(date -u +%Y%m%dT%H%M%SZ)"
+    temporary=$(mktemp /etc/lvm/.lvm.conf.proxytools.XXXXXX)
     cp -a /etc/lvm/lvm.conf "$backup"
-    sed -i '/^activation {/a\
-\tthin_pool_autoextend_threshold = 80\
-\tthin_pool_autoextend_percent = 20' /etc/lvm/lvm.conf
+    awk '
+        /^[[:space:]]*# Proxy Tools build-lab thin-pool autoextend$/ { next }
+        /^[[:space:]]*# End Proxy Tools build-lab thin-pool autoextend$/ { next }
+        /^[[:space:]]*thin_pool_autoextend_threshold[[:space:]]*=/ { next }
+        /^[[:space:]]*thin_pool_autoextend_percent[[:space:]]*=/ { next }
+        {
+            print
+            if (!inserted && $0 ~ /^activation[[:space:]]*\{[[:space:]]*$/) {
+                print "\t# Proxy Tools build-lab thin-pool autoextend"
+                print "\tthin_pool_autoextend_threshold = 80"
+                print "\tthin_pool_autoextend_percent = 20"
+                print "\t# End Proxy Tools build-lab thin-pool autoextend"
+                inserted=1
+            }
+        }
+        END { if (!inserted) exit 1 }
+    ' /etc/lvm/lvm.conf >"$temporary" \
+        || { rm -f -- "$temporary"; fail 'could not update the LVM activation section'; }
+    chmod --reference=/etc/lvm/lvm.conf "$temporary"
+    chown --reference=/etc/lvm/lvm.conf "$temporary"
+    mv -- "$temporary" /etc/lvm/lvm.conf
     if ! lvmconfig --validate 9>&-; then
         cp -a "$backup" /etc/lvm/lvm.conf
         fail 'invalid LVM configuration; restored the original file'
+    fi
+    if [[ "$(thin_pool_autoextend_values)" != '80 20' ]]; then
+        cp -a "$backup" /etc/lvm/lvm.conf
+        fail 'LVM ignored the requested autoextend values; restored the original file'
     fi
     systemctl restart lvm2-monitor.service
     printf 'Configured LVM thin-pool autoextend (80%% threshold, 20%% growth); backup: %s\n' \
         "$backup"
 }
 
-configure_thin_pool_autoextend
+if (( CHECK_ONLY )); then
+    validate_thin_pool_autoextend
+else
+    configure_thin_pool_autoextend
+fi
 
 pveversion >/dev/null || fail 'this does not appear to be a Proxmox VE host'
 pvesm status --storage local | grep -q '^local[[:space:]]' \
@@ -120,7 +162,12 @@ pvesm status --storage local-lvm | grep -q '^local-lvm[[:space:]]' \
 grep -A5 '^dir: local$' /etc/pve/storage.cfg | grep -q 'snippets' \
     || fail 'local storage must allow snippets content'
 ip link show vmbr0 >/dev/null 2>&1 || fail 'required guest bridge is unavailable: vmbr0'
-mkdir -p -- "$IMAGE_DIR" "$SNIPPET_DIR"
+if (( CHECK_ONLY )); then
+    [[ -d "$IMAGE_DIR" ]] || fail "required image directory is missing: $IMAGE_DIR"
+    [[ -d "$SNIPPET_DIR" ]] || fail "required snippet directory is missing: $SNIPPET_DIR"
+else
+    mkdir -p -- "$IMAGE_DIR" "$SNIPPET_DIR"
+fi
 
 config_value() {
     local vmid=$1 key=$2

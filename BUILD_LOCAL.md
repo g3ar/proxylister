@@ -134,8 +134,9 @@ The live test is diagnostic and release-maintainer-facing, not part of normal
 contributor iteration. Interactive browser validation remains manual because
 it requires a usable selected proxy and an installed external browser.
 
-## Remaining release limitation
+## Place in the release pipeline
 
-The local artifact contract and Linux dependency set are now fixed. This still
-is not the final release pipeline: publishable builds require a clean release
-worktree, and isolated remote orchestration is not implemented yet.
+The local artifact contract and Linux dependency set are fixed. Local builds
+remain the normal contributor workflow; publishable builds additionally require
+a clean release worktree and the implemented isolated PVE orchestration in
+`BUILD_REMOTE.md`. Publishing still waits for the separate Windows stage.

@@ -377,6 +377,11 @@ Its normal mode transfers the current worktree for development. Its explicit
 `git archive` from `HEAD`, and verifies that same archive in both guests.
 Build and host provisioning share a PVE-side kernel lock; a contender must exit
 before cleaning local state or touching VMs.
+PVE orchestration regressions are infrastructure checks, not part of the
+project's normal Python test suite. Keep them beside the orchestration scripts
+and run them explicitly with `./release/pve/test_pve_build.sh` and
+`./release/pve/test_provision_host.sh` when changing PVE build, cleanup, or
+host-validation behavior.
 Before a new run, it must reconcile clones retained by previous failures: only
 exact unprotected non-template names `proxytools-debian-build-VMID` and
 `proxytools-ubuntu-validation-VMID` may be shut down and deleted automatically.
