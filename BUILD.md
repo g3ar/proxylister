@@ -1,72 +1,221 @@
-# Proxy Tools build overview
+# Proxy Tools single-executable builds
 
-Proxy Tools has a primary local developer workflow and an additional remote
-release-maintainer workflow. They use the same committed PyInstaller definition
-and smoke tests but serve different audiences:
-
-- [BUILD_LOCAL.md](BUILD_LOCAL.md) is the normal contributor path. It builds and
-  tests the current worktree on the contributor's own machine.
-- [BUILD_REMOTE.md](BUILD_REMOTE.md) is an optional maintainer layer for
-  isolated release builds on the project's PVE server. Contributors do not
-  need access to it.
-
-Build documentation is for maintainers. End users follow `README.md`, either
-from a normal `git clone` checkout or beside a downloaded standalone binary.
-The remote lab is not a requirement for a code contribution or pull request.
+This is the only build runbook. It covers local and PVE-assisted creation and
+testing of standalone executables. Normal users either clone the repository and
+run `./proxytools`, or download a prepared binary as described in `README.md`;
+they do not need this document.
 
 ## Current status
 
-| Capability | Status |
+| Stage | Status |
 |---|---|
-| Local Linux source tests | Implemented |
-| Local Linux one-file build | Implemented |
-| Local frozen smoke tests | Implemented |
-| Locked Linux build dependencies | Implemented |
-| Optional live Linux smoke tests | Implemented |
-| Debian 13 PVE template | Provisioned and validated |
-| Ubuntu 24.04 LTS compatibility template | Provisioned and validated |
-| Clean-PVE template bootstrap | Implemented |
-| Automated PVE Linux build/test | Implemented |
-| PVE-wide build/provision lock | Implemented |
-| PVE destructive-guard shell tests | Implemented |
-| PVE LVM thin-pool autoextend | Implemented |
-| Clean checksummed PVE source snapshot | Implemented (`--release`) |
-| Windows template and build | Deferred to a separate later stage |
-| Release publishing automation | Not implemented |
+| Local Linux x86_64 build and offline frozen smoke | Implemented |
+| Optional local Linux live smoke | Implemented |
+| Debian 13 PVE native build | Implemented |
+| Ubuntu 24.04 LTS PVE compatibility smoke | Implemented |
+| Clean checksummed PVE release snapshot | Implemented with `--release` |
+| Windows template | Not implemented |
+| Windows native build and smoke | Blocked on the accepted template |
+| Release publication | Not implemented |
 
-Do not describe a planned step as operational. When a stage becomes usable,
-update this table and its dedicated runbook in the same change.
+Do not describe a planned stage as operational. Update this table when a stage
+actually becomes usable.
 
 ## Shared release rules
 
-A local dirty-worktree build is useful evidence during development but is not
-publishable. A release build must start from one clean release worktree and
-record the exact commit. All platform builders must receive the same source
-snapshot, including the committed build and test scripts.
+A local dirty-worktree build is useful for development but is not publishable.
+A release build starts from one clean release worktree and records the exact
+commit. Linux and Windows must eventually consume the same checksummed source
+snapshot and pass native automated tests.
 
-Each native build must:
+Each native builder must:
 
 1. create a fresh build environment;
 2. run the complete source tests and validation;
 3. build from the committed PyInstaller definition;
-4. test the frozen executable without the source tree or build environment in
-   `PATH`;
-5. return the executable, user-facing `README.md`, MIT `LICENSE`, manifest,
-   checksums, and complete logs.
+4. test the executable without the source tree or build environment in `PATH`;
+5. return the executable, root user guide, `LICENSE`, manifest, checksums, and
+   complete logs.
 
 Generated environments, VM images, credentials, artifacts, and logs are local
-state and must never be committed. `pyproject.toml` remains the authoritative
-project manifest. `release/linux/constraints.txt` pins the exact verified Linux
-build environment; it is build input, not a second end-user runtime manifest.
+state and must not be committed. `pyproject.toml` remains the only project and
+dependency manifest. Exact Linux build dependencies are locked in
+`release/linux/constraints.txt`.
 
-Local build internals and diagnostic logs remain under `release/.work/`. The
-complete latest successful artifact set is promoted to ignored `release/bin/`
-for manual testing. Every new local build removes the previous `release/bin/`
-before starting, so it never exposes a stale binary as current output.
+## Local Linux build
 
-The supported Linux binary baseline is current stable/LTS distributions. Older
-systems may use the source workflow documented in `README.md`.
+From anywhere inside the checkout, run:
 
-Windows work is intentionally out of scope until the remote Linux workflow is
-complete. When activated, it gets its own runbook rather than being mixed into
-either Linux document.
+```bash
+./release/linux/build.sh
+```
+
+Use this when changing packaging, startup, bundled resources, runtime paths,
+configuration bootstrap, PyInstaller-sensitive imports, or before handing off
+a release-related change. It accepts a dirty worktree so work in progress can
+be tested.
+
+The script removes its previous `release/.work/local-linux/` and
+`release/bin/`, creates a fresh release-only virtual environment, enforces the
+locked dependencies, runs source validation, builds the one-file executable,
+and runs deterministic offline frozen smoke. Only a fully successful artifact
+set is promoted to `release/bin/`.
+
+The result contains:
+
+- `proxytools`;
+- a generated copy of the root `README.md` for the distribution;
+- `LICENSE`;
+- `MANIFEST.txt`;
+- `SHA256SUMS`.
+
+`MANIFEST.txt` records the project version, source commit, clean/dirty state,
+UTC build time, platform, Python, pip, PyInstaller, and constraints checksum.
+The executable reports embedded build identity through `--about`. Detailed
+output remains in `release/.work/local-linux/logs/build.log`.
+
+Rerun deterministic frozen smoke against the current artifact without a new
+build:
+
+```bash
+./release/linux/smoke.sh release/bin/proxytools
+```
+
+Run the bounded network-dependent smoke separately:
+
+```bash
+./release/linux/smoke-live.sh release/bin/proxytools
+```
+
+Its list and monitor logs remain in
+`release/.work/local-linux/logs/live-list.log` and `live-monitor.log`, including
+after failure. Interactive browser and TUI acceptance remain manual.
+
+## PVE Linux build
+
+The maintainer host is `root@192.168.66.2`. PVE is not required for ordinary
+development. The build lab uses these stopped, protected, immutable templates:
+
+| VMID | Name | Purpose |
+|---|---|---|
+| `9000` | `proxytools-linux-template` | Debian 13 native build and test |
+| `9001` | `proxytools-ubuntu-2404-check-template` | Ubuntu 24.04 LTS compatibility smoke |
+
+Never boot, build in, modify, or delete either base template during an ordinary
+build. Run the development workflow through disposable linked clones:
+
+```bash
+./release/pve/linux/build.sh
+```
+
+The orchestrator transfers the current worktree, builds and tests it in a
+Debian clone, retrieves the artifact and logs, then validates that exact
+artifact through offline and live smoke in an Ubuntu clone. It promotes output
+to `release/bin/` only after both operating-system gates pass.
+
+Successful exact clones are shut down and deleted. The active clone and
+available diagnostics are retained on failure. At the beginning of the next
+run, only exact unprotected non-template clones named
+`proxytools-debian-build-VMID` or `proxytools-ubuntu-validation-VMID` may be
+reconciled automatically. Unrelated VMs and protected templates are never
+cleanup targets.
+
+Logs remain under `release/.work/pve-linux/logs/{debian,ubuntu}/`. Override
+connection defaults without editing the script when necessary:
+
+```bash
+PROXYTOOLS_PVE_HOST=root@PVE_HOST \
+PROXYTOOLS_PVE_ROOT_KEY=/path/to/pve-root-key \
+PROXYTOOLS_PVE_GUEST_KEY=/path/to/proxytools-build-key \
+  ./release/pve/linux/build.sh
+```
+
+The default host key is `~/.ssh/id_rsa`; the guest key is
+`~/.ssh/proxytools-build`. Ephemeral guest host keys stay in ignored build work.
+
+For a publishable candidate, use the explicit clean-snapshot mode:
+
+```bash
+./release/pve/linux/build.sh --release
+```
+
+It refuses tracked or untracked worktree changes before cleanup, creates one
+checksummed `git archive` from `HEAD`, and verifies that same archive in both
+guests. Build and provisioning operations share a PVE-side kernel lock; a
+contender exits before touching local output or VMs.
+
+### Provision or audit the Linux templates
+
+The clean-host bootstrap is `release/pve/linux/provision-host.sh`. PVE storage
+and `vmbr0` networking are site-specific prerequisites and must already be
+configured. Copy the script and only the public half of the dedicated guest key
+to the host:
+
+```bash
+scp release/pve/linux/provision-host.sh root@PVE_HOST:/root/
+scp ~/.ssh/proxytools-build.pub root@PVE_HOST:/root/
+ssh root@PVE_HOST \
+  /root/provision-host.sh \
+    --ssh-public-key /root/proxytools-build.pub
+```
+
+The bootstrap validates host prerequisites, verifies official cloud-image
+checksums, creates and validates protected templates `9000` and `9001`, and
+retains failed provisioning state for diagnosis. It never replaces an occupied
+VMID or a mismatched cached image automatically.
+
+Audit the existing host without downloading, creating, or changing anything:
+
+```bash
+ssh root@PVE_HOST /root/provision-host.sh --check-only
+```
+
+Run infrastructure checks explicitly; they are not part of the Python source
+test suite:
+
+```bash
+./release/pve/linux/tests/test_build.sh
+./release/pve/linux/tests/test_provision_host.sh
+```
+
+The second command performs a read-only comparison against the configured PVE
+host. All Linux PVE code and checks stay under `release/pve/linux/`; Windows PVE
+code and checks stay under `release/pve/windows/`. The root `tests/` directory
+is only for Python tests of project source.
+
+### Cached installation media and safe cleanup
+
+Verified cloud images, Windows installation ISOs, and versioned VirtIO driver
+ISOs under `/var/lib/vz/template/iso/` are persistent build-lab state. Validate
+their recorded upstream checksum and reuse them. Automation may remove
+incomplete `.part` files and generated unattended-answer media, but must never
+delete verified source media.
+
+Before purging a disposable VM, detach every cached ISO or cloud image and
+verify that `qm config VMID` no longer references it. `qm destroy --purge 1`
+can delete attached ISO volumes. Also refuse cleanup when the target is a base
+template, has `template=1`, remains protected, or its exact name and VMID do not
+match the expected disposable guest.
+
+## Windows build stage
+
+Windows work is deliberately staged. First create and validate a repeatable
+template under `release/pve/windows/`. Do not package or test the project binary
+until the template is accepted.
+
+The target build environment is current Windows 11 Enterprise Evaluation;
+LTSC 2024 evaluation media has an expired fixed build and must not be used.
+Python 3.13 is pinned and Windows 11-only APIs must be avoided. The resulting
+x86_64 executable is expected to work on Windows 10, but compatibility must not
+be described as validated until the frozen artifact passes a native Windows 10
+smoke run.
+
+The Windows stage must reuse the Linux workflow's safety contract: protected
+immutable template, disposable clones, retained verified source media, bounded
+waits, exact cleanup guards, complete returned logs, and the same clean source
+snapshot used for Linux. Its implementation and infrastructure checks belong
+only under `release/pve/windows/`.
+
+Release publication and tagging remain deferred until both platform binaries
+pass their native gates. Manual TUI acceptance happens before the user declares
+a release ready and is not part of release automation.

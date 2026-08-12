@@ -3,8 +3,8 @@
 
 set -euo pipefail
 
-PVE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-# shellcheck source=build.sh
+PVE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+# shellcheck source=../build.sh
 source "$PVE_DIR/build.sh"
 
 declare -A NAMES TEMPLATES PROTECTIONS STATUSES

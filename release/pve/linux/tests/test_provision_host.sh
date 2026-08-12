@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-PVE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PVE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 PVE_HOST=${PROXYTOOLS_PVE_HOST:-root@192.168.66.2}
 PVE_ROOT_KEY=${PROXYTOOLS_PVE_ROOT_KEY:-$HOME/.ssh/id_rsa}
 REMOTE_SCRIPT="/tmp/proxytools-provision-read-only-$$.sh"

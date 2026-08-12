@@ -4,12 +4,14 @@ This file is the shared starting context for new Codex chats working on this
 repository. It is versioned with the project so the same operational context is
 available after a fresh clone or on another machine. Read it before making
 changes, then inspect the current worktree because this file does not replace
-the code, tests, `README.md`, or `DEVELOPERS.md` as sources of truth.
+the code, tests, `README.md`, `DEVELOPERS.md`, or `BUILD.md` as sources of
+truth.
 
 ## Start every new chat here
 
 1. Run `git status --short --branch` and preserve all existing user changes.
-2. Read the relevant sections of `README.md` and `DEVELOPERS.md`.
+2. Read the relevant sections of `README.md` and `DEVELOPERS.md`; read
+   `BUILD.md` before standalone build, release, or PVE work.
 3. Use `rg` / `rg --files` for code and file discovery.
 4. Inspect the implementation and tests before proposing a fix.
 5. Do not run cleanup, reset, checkout, rebase, amend, revert, force-push, or
@@ -308,11 +310,24 @@ updates to `.gitignore`, cleanup code/tests, and user documentation.
 
 ## Documentation rules
 
-- `README.md` is detailed user documentation with use cases and examples.
-- `DEVELOPERS.md` contains internals and contributor guidance.
-- `BUILD.md` is the maintainer-only build overview and status map.
-- `BUILD_LOCAL.md` is the local Linux build and frozen-smoke runbook.
-- `BUILD_REMOTE.md` is the PVE template and remote Linux build-lab runbook.
+- `README.md` at the repository root is the project's only `README.md` and the
+  only user-facing source document.
+- `DEVELOPERS.md` is the single human-facing home for internals, source
+  development, testing, and contributor guidance.
+- `BUILD.md` is the single human-facing runbook for all standalone-executable
+  builds and their tests, whether local or PVE-assisted, including build-lab
+  provisioning, release status, and operating procedures.
+- `AGENTS.md` is the single home for AI-agent handoff context and durable chat
+  agreements that should survive between sessions.
+- Do not create nested `README.md` files, additional `BUILD*.md` files,
+  separate runbooks, or other scattered Markdown documentation. Put
+  implementation-specific details in module docstrings or comments beside the
+  relevant code; otherwise update one of the four root documents above
+  according to its audience.
+- `release/pve/linux/` contains all Linux PVE provisioning, build orchestration,
+  and infrastructure tests.
+- `release/pve/windows/` is the exclusive home for future Windows PVE template,
+  build, and infrastructure-test work.
 - Module docstrings at the top of scripts should explain what the file is, why
   it exists, and how it is used.
 - CLI `--help` output is derived from the corresponding module documentation
@@ -324,14 +339,12 @@ the README.
 
 ## Release/build lab
 
-Release/build work is active and split into two explicit Linux workflows. The
-local workflow in `BUILD_LOCAL.md` is the normal contributor path and is
-implemented. PVE access is never required for ordinary development, fixes,
-tests, reviews, or pull requests. The remote workflow in `BUILD_REMOTE.md` is
-an additional maintainer release layer with implemented Debian build and Ubuntu
-compatibility orchestration. Read the relevant runbook before
-build work; do not merge local and remote operator instructions back into one
-document.
+Release/build work is active and split into local and PVE Linux workflows,
+documented together in `BUILD.md`. The local workflow is the normal
+contributor path. PVE access is never required for ordinary development, fixes,
+tests, reviews, or pull requests. The remote workflow is an additional
+maintainer release layer with implemented Debian build and Ubuntu compatibility
+orchestration.
 
 Generated local build output lives under ignored `release/.work/`. Local dirty-
 worktree artifacts are for development only. A real release requires one clean,
@@ -355,18 +368,29 @@ exact UTC build time and source commit for `--about`.
 The PVE server is `root@192.168.66.2`; Linux template `9000` is stopped,
 protected, and immutable between explicit maintenance sessions. Never build in
 the template or delete it. Build only in a disposable linked clone and apply
-the exact validation and cleanup guards from `BUILD_REMOTE.md`.
+the validation and cleanup guards in `BUILD.md` and the orchestrator.
 Ubuntu 24.04 LTS compatibility template `9001` is also stopped, protected, and
 immutable. It is for running the returned standalone artifact in a disposable
 linked clone, not for producing a second Linux build. Never boot or delete
 either base template directly.
-`release/pve/provision-host.sh` is the authoritative clean-host bootstrap for
+`release/pve/linux/provision-host.sh` is the authoritative clean-host bootstrap for
 these templates. It validates rather than rewrites site-specific PVE storage
 and networking, verifies official cloud-image checksums, never replaces an
 occupied VMID/image automatically, and retains failed provisioning state for
-diagnosis. Keep its invariants synchronized with `BUILD_REMOTE.md` and the
-actual template contract.
-`release/pve/build.sh` is the implemented maintainer build/test orchestrator.
+diagnosis. Keep its invariants synchronized with `BUILD.md` and the actual
+template contract.
+Verified source media under `/var/lib/vz/template/iso/` is persistent build-lab
+state. Keep cloud images, installation ISOs, and driver ISOs after successful
+template creation so future maintenance does not download them again.
+Automated provisioning and cleanup may remove incomplete `.part` files and
+generated unattended-answer media only; it must never delete verified source
+media. Validate cached media against its recorded upstream checksum before
+reuse.
+Before destroying any VM that has installation media attached, detach every
+cached ISO/cloud image from its VM configuration and verify that the config no
+longer references source media. PVE `qm destroy --purge 1` can delete attached
+ISO volumes; exact VMID/name guards alone do not protect the media cache.
+`release/pve/linux/build.sh` is the implemented maintainer build/test orchestrator.
 It builds the current worktree in a disposable Debian clone, validates the same
 artifact through offline and live smoke in Ubuntu, retrieves artifacts/logs,
 deletes only successful exact clones, and retains the active clone on failure.
@@ -378,38 +402,57 @@ Its normal mode transfers the current worktree for development. Its explicit
 Build and host provisioning share a PVE-side kernel lock; a contender must exit
 before cleaning local state or touching VMs.
 PVE orchestration regressions are infrastructure checks, not part of the
-project's normal Python test suite. Keep them beside the orchestration scripts
-and run them explicitly with `./release/pve/test_pve_build.sh` and
-`./release/pve/test_provision_host.sh` when changing PVE build, cleanup, or
-host-validation behavior.
+project's normal Python test suite. Keep them in the platform's dedicated
+`release/pve/PLATFORM/tests/` directory and run Linux checks explicitly with
+`./release/pve/linux/tests/test_build.sh` and
+`./release/pve/linux/tests/test_provision_host.sh` when changing PVE build,
+cleanup, or host-validation behavior. The root `tests/` directory contains only
+Python tests for source application behavior and must not collect release-lab
+or PVE environment checks.
 Before a new run, it must reconcile clones retained by previous failures: only
 exact unprotected non-template names `proxytools-debian-build-VMID` and
 `proxytools-ubuntu-validation-VMID` may be shut down and deleted automatically.
 Never weaken these guards or allow stale clones to accumulate across reruns.
-
 Root access to the PVE host is intentionally delegated for project build-lab
-work. Within an explicitly requested task, creating, configuring, starting,
-stopping, cloning, templating, and deleting project VMs on that host is already
-authorized. This authorization includes all routine SSH commands, linked-clone
-lifecycle operations, source/artifact transfer, commands inside project guests,
-log retrieval, and deletion of exact disposable clones after successful work.
-Do not ask the user for permission at each of these steps and do not surface a
-tool/sandbox escalation as if it were a new PVE authorization question; use the
-already approved SSH/rsync routes and proceed autonomously. Retain exact
-VMID/name checks, bounded waits, template protection, and the cleanup guards in
-`BUILD_REMOTE.md`. Ask only when an action would affect the PVE host itself,
-unrelated workloads or data, credentials, network infrastructure, or otherwise
-materially expand beyond the requested project task. Also ask before a
-destructive action involving a template or a downloaded ISO/cloud image
-whenever the exact target, continued need, or safe recovery path is uncertain.
+work. An explicit request to provision, build, test, validate, repair, or finish
+a project release-lab stage is standing authorization to manage its complete
+disposable VM lifecycle without further confirmation. Proceed autonomously with
+routine SSH/SCP/rsync commands; selecting an unused VMID; creating, configuring,
+starting, stopping, rebooting, and deleting exact project-owned temporary VMs or
+linked clones; running commands inside them; transferring source and artifacts;
+retrieving logs; and reconciling exact failed clones from earlier attempts. This
+authorization applies to project-owned disposable guests and does not need to
+be repeated in a new chat while this repository instruction remains in force.
 
-Do not start Windows packaging or provisioning until remote Linux orchestration
-is implemented and proven.
+Do not pause to ask permission before any routine disposable-guest step, and do
+not present a tool or sandbox escalation as though the user must re-authorize
+the PVE operation. Use the approved connection routes and continue through the
+requested stage. A product approval dialog may still be mechanically required
+by the execution environment; request it with wording that identifies it as
+technical access for the already authorized project operation, not as a new
+decision about whether the VM action is allowed.
+
+This standing authorization is deliberately narrow. Retain exact VMID/name
+checks, bounded waits, protected-template validation, retained-media rules, and
+the cleanup guards in `BUILD.md` and the orchestration code. Ask only
+before affecting the PVE host
+configuration itself, a base template, cached installation media, unrelated
+workloads or data, credentials, network infrastructure, or any target whose
+identity or recovery path is uncertain. Never infer authority to delete or boot
+a protected base template.
+
+Remote Linux orchestration is implemented and proven under `release/pve/linux/`.
+Windows PVE work belongs only under `release/pve/windows/`: use the Linux
+provisioner as the lifecycle/safety reference, keep guest-specific mechanics
+narrow, and do not add or run Windows project packaging until the template is
+repeatable and the user accepts it.
 
 The supported standalone scope is:
 
 - native Linux x86_64 executable targeting current stable/LTS distributions;
-- native Windows 10 x86_64 executable;
+- native Windows x86_64 executable built on current Windows 11 Enterprise
+  Evaluation, with Windows 10 compatibility expected but unvalidated until a
+  native Windows 10 smoke run;
 - Selenium embedded unconditionally; browser external;
 - `README.md` beside each distributed binary;
 - external config and runtime data beside the binary;
@@ -425,7 +468,7 @@ Release work happens only for stable versions in a temporary release branch
 and separate worktree. Both binaries must eventually be built from the same
 clean commit and pass native automated tests. Manual TUI acceptance happens
 before the user declares a release ready and is not part of the release
-pipeline. See the three build documents for current scope and status.
+pipeline. See `BUILD.md` for the human-facing workflow and current status.
 
 ## Git collaboration policy
 
@@ -464,6 +507,15 @@ technical discussion. Be candid about trade-offs and point out overengineering
 or unsafe assumptions. For requested implementation, proceed autonomously
 inside the agreed scope. When the user explicitly says to discuss a feature or
 not edit yet, do not modify files until agreement is reached.
+
+Treat durable project decisions made in chat as repository knowledge, not
+session-only memory. When a new agreement will govern future implementation,
+operations, safety, release work, or user experience, update `AGENTS.md` in the
+same change without waiting for a separate reminder. Keep detailed human-facing
+development procedures in `DEVELOPERS.md`, standalone build procedures in
+`BUILD.md`, or implementation-specific details beside the relevant code, and
+record the concise invariant here. Do not add temporary observations, one-off
+task status, credentials, host secrets, or speculative plans to `AGENTS.md`.
 
 Lead handoff messages with the result. Report changed behavior, tests actually
 run, remaining risks, and whether a commit/push was performed. Do not claim a

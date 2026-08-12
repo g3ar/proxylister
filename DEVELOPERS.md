@@ -43,31 +43,15 @@ The project deliberately favors small, removable designs. Do not add another
 entrypoint, dependency manifest, generic result flag, background service, or
 configuration layer for a hypothetical future need.
 
-## Local development and build checks
+## Local development checks
 
-Normal development is entirely local. Contributors are expected to edit the
-checkout, run focused regression tests while iterating, and finish with the
-full validation commands in this guide. Access to the maintainer's PVE server
-is not required for development, bug fixes, pull requests, or ordinary code
-review.
+Normal development is entirely local. Contributors edit the checkout, run
+focused regression tests while iterating, and finish with the full validation
+commands in this guide. PVE access and a frozen executable are not required for
+ordinary development, bug fixes, pull requests, or code review.
 
-Most changes do not require rebuilding the standalone executable on every
-iteration. Run the local one-file workflow when changing packaging, startup,
-runtime paths, bundled resources, configuration bootstrap, imports that may
-affect PyInstaller, or before handing off a release-related change:
-
-```bash
-./release/linux/build.sh
-```
-
-See [BUILD_LOCAL.md](BUILD_LOCAL.md) for its artifact, manifest, log, and smoke-
-test contract. The remote PVE lab is an additional release-maintainer isolation
-layer documented separately in `BUILD_REMOTE.md`; it is not part of the normal
-contributor loop.
-
-Local build diagnostics remain in `release/.work/`. After success, use the
-fresh artifact set in `release/bin/` for manual testing; the build script removes
-the previous `bin/` before every attempt so stale binaries do not accumulate.
+All operator instructions for building and testing standalone single-file
+executables, locally or through PVE, are centralized in [BUILD.md](BUILD.md).
 
 ## Mental model
 
@@ -147,7 +131,10 @@ src/proxytools/
     results.py              list formatting, filtering, and sorting
     dashboard.py            Textual rendering and app lifecycle
     dashboard_widgets.py    filter and analytics modals
-tests/                      offline standard-library unittest suite
+tests/                      offline Python tests for source application behavior
+release/pve/linux/          Linux PVE provisioning and build orchestration
+release/pve/linux/tests/    Linux PVE environment/infrastructure checks
+release/pve/windows/        Windows PVE workflow and its future tests
 ```
 
 Generated state is per clone and ignored by Git:
@@ -487,6 +474,11 @@ launcher once so its refresh/install path is exercised in addition to tests.
 Tests use standard-library `unittest` and must remain offline and deterministic.
 Mock ProxyScrape, DB-IP, identity services, target sites, browsers, clocks, and
 filesystem homes as appropriate.
+
+The root `tests/` tree is exclusively for Python tests of the source project.
+PVE environment, provisioning, cleanup-guard, and orchestration checks are not
+application tests; keep them under the corresponding
+`release/pve/PLATFORM/tests/` directory and invoke them explicitly.
 
 For a normal Python change, run from the repository root:
 

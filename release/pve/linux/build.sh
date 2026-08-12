@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 WORK="$ROOT/release/.work/pve-linux"
 BIN="$ROOT/release/bin"
 ARTIFACTS="$WORK/artifacts"
