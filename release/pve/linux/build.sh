@@ -117,6 +117,33 @@ config_value() {
     pve "qm config $vmid" | sed -n "s/^${key}: //p"
 }
 
+references_cached_source_media() {
+    local line=$1
+    [[ "$line" == *':iso/'* \
+        || "$line" == *'/var/lib/vz/template/iso/'* ]]
+}
+
+detach_cached_source_media() {
+    local vmid=$1 config line slot
+
+    config=$(pve "qm config $vmid")
+    while IFS= read -r line; do
+        references_cached_source_media "$line" || continue
+        slot=${line%%:*}
+        if [[ "$slot" =~ ^(ide|sata|scsi|virtio|unused)[0-9]+$ ]]; then
+            pve "qm set $vmid --delete $slot"
+            printf 'Detached cached source media from clone %s slot %s.\n' \
+                "$vmid" "$slot"
+        fi
+    done <<<"$config"
+
+    config=$(pve "qm config $vmid")
+    while IFS= read -r line; do
+        references_cached_source_media "$line" || continue
+        fail "refusing to delete clone $vmid while its config references cached source media: $line"
+    done <<<"$config"
+}
+
 validate_template() {
     local vmid=$1 expected_name=$2
 
@@ -260,6 +287,7 @@ remove_owned_clone() {
     done
     [[ "$(pve "qm status $vmid")" == 'status: stopped' ]] \
         || fail "clone $vmid did not stop"
+    detach_cached_source_media "$vmid"
     pve "qm destroy $vmid --purge 1"
     printf 'Deleted disposable clone %s (%s).\n' "$vmid" "$expected_name"
 }

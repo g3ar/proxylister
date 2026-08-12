@@ -174,6 +174,33 @@ config_value() {
     qm config "$vmid" | sed -n "s/^${key}: //p"
 }
 
+references_cached_source_media() {
+    local line=$1
+    [[ "$line" == *':iso/'* \
+        || "$line" == *'/var/lib/vz/template/iso/'* ]]
+}
+
+detach_cached_source_media() {
+    local vmid=$1 config line slot
+
+    config=$(qm config "$vmid")
+    while IFS= read -r line; do
+        references_cached_source_media "$line" || continue
+        slot=${line%%:*}
+        if [[ "$slot" =~ ^(ide|sata|scsi|virtio|unused)[0-9]+$ ]]; then
+            qm set "$vmid" --delete "$slot"
+            printf 'Detached cached source media from VMID %s slot %s.\n' \
+                "$vmid" "$slot"
+        fi
+    done <<<"$config"
+
+    config=$(qm config "$vmid")
+    while IFS= read -r line; do
+        references_cached_source_media "$line" || continue
+        fail "refusing to delete VMID $vmid while its config references cached source media: $line"
+    done <<<"$config"
+}
+
 validate_template() {
     local vmid=$1 expected_name=$2 expected_memory=$3
 
@@ -306,6 +333,7 @@ validate_linked_clone() {
         || fail "refusing to delete template VMID $clone_vmid"
     [[ "$(config_value "$clone_vmid" protection)" == 0 ]] \
         || fail "validation clone $clone_vmid is protected"
+    detach_cached_source_media "$clone_vmid"
     qm destroy "$clone_vmid" --purge 1
     ACTIVE_VMID=
     printf 'Validated linked-clone boot from template %s.\n' "$template_vmid"

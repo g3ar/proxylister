@@ -389,7 +389,10 @@ reuse.
 Before destroying any VM that has installation media attached, detach every
 cached ISO/cloud image from its VM configuration and verify that the config no
 longer references source media. PVE `qm destroy --purge 1` can delete attached
-ISO volumes; exact VMID/name guards alone do not protect the media cache.
+ISO volumes; exact VMID/name guards alone do not protect the media cache. Every
+project script that invokes `qm destroy --purge 1` must enforce this
+detach-and-recheck gate immediately before destruction and must fail closed on
+an unsupported media reference.
 `release/pve/linux/build.sh` is the implemented maintainer build/test orchestrator.
 It builds the current worktree in a disposable Debian clone, validates the same
 artifact through offline and live smoke in Ubuntu, retrieves artifacts/logs,
@@ -413,33 +416,44 @@ Before a new run, it must reconcile clones retained by previous failures: only
 exact unprotected non-template names `proxytools-debian-build-VMID` and
 `proxytools-ubuntu-validation-VMID` may be shut down and deleted automatically.
 Never weaken these guards or allow stale clones to accumulate across reruns.
-Root access to the PVE host is intentionally delegated for project build-lab
-work. An explicit request to provision, build, test, validate, repair, or finish
-a project release-lab stage is standing authorization to manage its complete
-disposable VM lifecycle without further confirmation. Proceed autonomously with
-routine SSH/SCP/rsync commands; selecting an unused VMID; creating, configuring,
-starting, stopping, rebooting, and deleting exact project-owned temporary VMs or
-linked clones; running commands inside them; transferring source and artifacts;
-retrieving logs; and reconciling exact failed clones from earlier attempts. This
-authorization applies to project-owned disposable guests and does not need to
-be repeated in a new chat while this repository instruction remains in force.
+The dedicated PVE build server `root@192.168.66.2` exists specifically so
+agents can perform project build-lab work autonomously. Once the user requests
+a PVE, template, build, test, validation, repair, or release-lab task, that
+request is standing authorization to do everything reasonably required on this
+one server to finish the task. Do not ask for confirmation for intermediate PVE
+actions and do not make the user supervise the VM lifecycle. This authorization
+applies only to `root@192.168.66.2`; it does not extend to any other PVE host,
+server, workstation, external service, or infrastructure.
 
-Do not pause to ask permission before any routine disposable-guest step, and do
-not present a tool or sandbox escalation as though the user must re-authorize
-the PVE operation. Use the approved connection routes and continue through the
-requested stage. A product approval dialog may still be mechanically required
-by the execution environment; request it with wording that identifies it as
-technical access for the already authorized project operation, not as a new
-decision about whether the VM action is allowed.
+Proceed without further permission for SSH/SCP/rsync; uploading the required
+public SSH keys, scripts, source, and artifacts; installing packages; changing
+build-lab host, storage, service, or guest configuration; choosing VMIDs;
+creating and modifying template candidates; creating, cloning, configuring,
+starting, stopping, rebooting, and deleting temporary VMs; running guest
+commands; retrieving logs; and reconciling leftovers from failed attempts. This
+authorization is durable across chats and applies equally to Linux and Windows
+build-lab work. Resolve routine operational choices yourself.
 
-This standing authorization is deliberately narrow. Retain exact VMID/name
-checks, bounded waits, protected-template validation, retained-media rules, and
-the cleanup guards in `BUILD.md` and the orchestration code. Ask only
-before affecting the PVE host
-configuration itself, a base template, cached installation media, unrelated
-workloads or data, credentials, network infrastructure, or any target whose
-identity or recovery path is uncertain. Never infer authority to delete or boot
-a protected base template.
+There are two non-negotiable preservation rules on this PVE build server:
+
+1. Never delete ISO files or other verified source installation media. Detach
+   them safely from a VM before purge and leave the cached files on the host.
+2. Never delete a verified template. A template candidate may be freely built,
+   repaired, replaced, or discarded before verification; after it has passed
+   its template validation and become a retained build-lab template, preserve
+   it. Ordinary work uses disposable clones rather than booting the verified
+   template itself.
+
+These preservation rules are hard stops, not prompts for more permission. Keep
+exact identity checks, bounded waits, protected-template validation, and the
+cleanup guards in `BUILD.md` and the orchestration code. If a destructive
+target cannot be proven to be a disposable VM or unverified template candidate,
+fail closed and diagnose it rather than asking to delete a protected asset.
+
+Do not present a tool or sandbox approval dialog as a new decision about
+whether the PVE action is allowed. If the execution environment mechanically
+requires approval, describe it only as technical access for the already
+authorized project operation and continue when access is granted.
 
 Remote Linux orchestration is implemented and proven under `release/pve/linux/`.
 Windows PVE work belongs only under `release/pve/windows/`: use the Linux

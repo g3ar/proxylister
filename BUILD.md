@@ -195,7 +195,9 @@ Before purging a disposable VM, detach every cached ISO or cloud image and
 verify that `qm config VMID` no longer references it. `qm destroy --purge 1`
 can delete attached ISO volumes. Also refuse cleanup when the target is a base
 template, has `template=1`, remains protected, or its exact name and VMID do not
-match the expected disposable guest.
+match the expected disposable guest. Both the Linux build orchestrator and
+template provisioner enforce this detach-and-recheck gate immediately before
+their destructive cleanup.
 
 ## Windows build stage
 

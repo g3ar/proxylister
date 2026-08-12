@@ -7,8 +7,9 @@ PVE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 # shellcheck source=../build.sh
 source "$PVE_DIR/build.sh"
 
-declare -A NAMES TEMPLATES PROTECTIONS STATUSES
+declare -A NAMES TEMPLATES PROTECTIONS STATUSES CONFIGS
 DESTROYED=
+DETACHED=
 TEST_ROOT=$(mktemp -d /tmp/proxytools-pve-build-test.XXXXXX)
 
 cleanup_test() {
@@ -43,6 +44,30 @@ pve() {
             vmid=${vmid%% *}
             STATUSES[$vmid]=stopped
             ;;
+        'qm config '*)
+            vmid=${command#qm config }
+            printf 'name: %s\n' "${NAMES[$vmid]-}"
+            printf 'protection: %s\n' "${PROTECTIONS[$vmid]-}"
+            [[ -z "${TEMPLATES[$vmid]-}" ]] \
+                || printf 'template: %s\n' "${TEMPLATES[$vmid]}"
+            [[ -z "${CONFIGS[$vmid]-}" ]] \
+                || printf '%s\n' "${CONFIGS[$vmid]}"
+            ;;
+        'qm set '*' --delete '*)
+            if [[ "$command" =~ ^qm\ set\ ([0-9]+)\ --delete\ ([a-z]+[0-9]+)$ ]]; then
+                local slot=${BASH_REMATCH[2]} line remaining=
+                vmid=${BASH_REMATCH[1]}
+                while IFS= read -r line; do
+                    [[ "${line%%:*}" == "$slot" ]] && continue
+                    remaining+="${remaining:+$'\n'}$line"
+                done <<<"${CONFIGS[$vmid]-}"
+                CONFIGS[$vmid]=$remaining
+                DETACHED+="${DETACHED:+ }$vmid:$slot"
+            else
+                printf 'unexpected mocked qm set command: %s\n' "$command" >&2
+                return 1
+            fi
+            ;;
         'qm destroy '*)
             vmid=${command#qm destroy }
             DESTROYED=${vmid%% *}
@@ -56,12 +81,13 @@ pve() {
 
 reset_vm() {
     local vmid=$1 name=$2 template=${3:-} protection=${4:-0} status=${5:-stopped}
-    NAMES=() TEMPLATES=() PROTECTIONS=() STATUSES=()
+    NAMES=() TEMPLATES=() PROTECTIONS=() STATUSES=() CONFIGS=()
     NAMES[$vmid]=$name
     TEMPLATES[$vmid]=$template
     PROTECTIONS[$vmid]=$protection
     STATUSES[$vmid]=$status
     DESTROYED=
+    DETACHED=
 }
 
 reset_vm 101 proxytools-debian-build-101 '' 0 running
@@ -89,6 +115,19 @@ assert_rejected 'refusing to delete template' cleanup_stale_clones
 reset_vm 105 proxytools-debian-build-105 '' 1 stopped
 assert_rejected 'refusing to delete protected' cleanup_stale_clones
 assert_rejected 'protected template VMID' remove_owned_clone 9000 proxytools-linux-template
+
+reset_vm 106 proxytools-debian-build-106 '' 0 stopped
+CONFIGS[106]=$'ide0: local:iso/debian-installer.iso,media=cdrom\nsata1: /var/lib/vz/template/iso/virtio-win.iso,media=cdrom\nide2: local-lvm:cloudinit,media=cdrom'
+remove_owned_clone 106 proxytools-debian-build-106
+[[ "$DETACHED" == '106:ide0 106:sata1' ]]
+[[ "$DESTROYED" == 106 ]]
+[[ "${CONFIGS[106]}" == 'ide2: local-lvm:cloudinit,media=cdrom' ]]
+
+reset_vm 107 proxytools-debian-build-107 '' 0 stopped
+CONFIGS[107]='args: -cdrom /var/lib/vz/template/iso/unmanaged.iso'
+assert_rejected 'config references cached source media' \
+    remove_owned_clone 107 proxytools-debian-build-107
+[[ -z "$DESTROYED" ]]
 
 SOURCE_REPO="$TEST_ROOT/source"
 mkdir -p "$SOURCE_REPO"
