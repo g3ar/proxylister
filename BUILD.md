@@ -14,8 +14,8 @@ they do not need this document.
 | Debian 13 PVE native build | Implemented |
 | Ubuntu 24.04 LTS PVE compatibility smoke | Implemented |
 | Clean checksummed PVE release snapshot | Implemented with `--release` |
-| Windows template | Not implemented |
-| Windows native build and smoke | Blocked on the accepted template |
+| Windows template | Implemented, validated, and accepted |
+| Windows native build and smoke | Not implemented; template is ready |
 | Release publication | Not implemented |
 
 Do not describe a planned stage as operational. Update this table when a stage
@@ -37,6 +37,21 @@ Each native builder must:
 5. return the executable, root user guide, `LICENSE`, manifest, checksums, and
    complete logs.
 
+Platform outputs are independent:
+
+```text
+release/bin/linux/
+release/bin/windows/
+```
+
+The Linux executable is named `proxytools`; the Windows executable is named
+`proxytools.exe`. Do not add OS, architecture, or version suffixes to either
+directory or executable name. Each platform directory carries its own
+`README.md`, `LICENSE`, `MANIFEST.txt`, and `SHA256SUMS`; OS, architecture,
+version, source identity, and build-tool identity belong in the executable
+metadata and that platform's manifest. A platform build may replace only its
+own output directory and must preserve the other platform's successful output.
+
 Generated environments, VM images, credentials, artifacts, and logs are local
 state and must not be committed. `pyproject.toml` remains the only project and
 dependency manifest. Exact Linux build dependencies are locked in
@@ -56,10 +71,10 @@ a release-related change. It accepts a dirty worktree so work in progress can
 be tested.
 
 The script removes its previous `release/.work/local-linux/` and
-`release/bin/`, creates a fresh release-only virtual environment, enforces the
-locked dependencies, runs source validation, builds the one-file executable,
-and runs deterministic offline frozen smoke. Only a fully successful artifact
-set is promoted to `release/bin/`.
+`release/bin/linux/`, creates a fresh release-only virtual environment,
+enforces the locked dependencies, runs source validation, builds the one-file
+executable, and runs deterministic offline frozen smoke. Only a fully
+successful artifact set is promoted to `release/bin/linux/`.
 
 The result contains:
 
@@ -78,13 +93,13 @@ Rerun deterministic frozen smoke against the current artifact without a new
 build:
 
 ```bash
-./release/linux/smoke.sh release/bin/proxytools
+./release/linux/smoke.sh release/bin/linux/proxytools
 ```
 
 Run the bounded network-dependent smoke separately:
 
 ```bash
-./release/linux/smoke-live.sh release/bin/proxytools
+./release/linux/smoke-live.sh release/bin/linux/proxytools
 ```
 
 Its list and monitor logs remain in
@@ -111,7 +126,7 @@ build. Run the development workflow through disposable linked clones:
 The orchestrator transfers the current worktree, builds and tests it in a
 Debian clone, retrieves the artifact and logs, then validates that exact
 artifact through offline and live smoke in an Ubuntu clone. It promotes output
-to `release/bin/` only after both operating-system gates pass.
+to `release/bin/linux/` only after both operating-system gates pass.
 
 Successful exact clones are shut down and deleted. The active clone and
 available diagnostics are retained on failure. At the beginning of the next
@@ -201,9 +216,10 @@ their destructive cleanup.
 
 ## Windows build stage
 
-Windows work is deliberately staged. First create and validate a repeatable
-template under `release/pve/windows/`. Do not package or test the project binary
-until the template is accepted.
+Windows work is deliberately staged. The repeatable template workflow under
+`release/pve/windows/` is implemented and has produced protected template VMID
+`9002`, which has been validated and accepted. Native Windows packaging and
+project smoke testing remain a separate, unimplemented stage.
 
 The target build environment is current Windows 11 Enterprise Evaluation;
 LTSC 2024 evaluation media has an expired fixed build and must not be used.
@@ -217,6 +233,61 @@ immutable template, disposable clones, retained verified source media, bounded
 waits, exact cleanup guards, complete returned logs, and the same clean source
 snapshot used for Linux. Its implementation and infrastructure checks belong
 only under `release/pve/windows/`.
+
+Sync the provisioning sources and dedicated public key to the build host, then
+run the host-side provisioner:
+
+```bash
+rsync -a --delete release/pve/windows/ \
+  root@PVE_HOST:/root/proxytools-windows-template/
+scp ~/.ssh/proxytools-build.pub root@PVE_HOST:/root/proxytools-build.pub
+ssh root@PVE_HOST \
+  '/root/proxytools-windows-template/provision-host.sh --ssh-public-key /root/proxytools-build.pub'
+```
+
+The provisioner verifies or downloads pinned media, creates only the exact
+unprotected candidate VMID `9002`, completes unattended Setup and bootstrap,
+observes the ready marker before accepting Sysprep shutdown, validates a fresh
+linked clone, deletes that successful clone, and only then protects the base
+template. A failure retains the exact active candidate for diagnosis.
+
+Audit the resulting template and cached media without changing the host:
+
+```bash
+ssh root@PVE_HOST \
+  '/root/proxytools-windows-template/provision-host.sh --check-only'
+./release/pve/windows/tests/test_provision_host.sh
+```
+
+The template is built from pinned official sources: the current Windows 11
+Enterprise Evaluation x64 ISO and its published Microsoft SHA256, the
+versioned stable upstream virtio-win ISO, the Microsoft OpenSSH Windows
+implementation as a version-pinned MSI from the official
+PowerShell/Win32-OpenSSH releases with its published GitHub digest, and a pinned
+Python 3.13 x64 installer from python.org with its published SHA256. Do not use
+the Windows Update-backed OpenSSH optional capability. Do not use third-party
+Windows images, mirrors, package bootstrap services, or floating `latest`
+artifacts. A Microsoft download that cannot be fetched non-interactively may
+be uploaded manually only when it is the exact official artifact and passes
+the pinned official checksum.
+
+Do not run cumulative Windows Update while preparing this short-lived build
+template. Install only the required components and pinned tools, prevent
+automatic OS updates and update-triggered reboots in build clones, and refresh
+the template deliberately from newer verified Microsoft evaluation media when
+needed. Cache and retain the verified Windows, VirtIO, Win32-OpenSSH, and Python
+source media on the PVE host. Generated unattended-answer media is temporary.
+
+Keep `Autounattend.xml` limited to deterministic Windows Setup, a local build
+administrator, and one bootstrap invocation. A single audited PowerShell
+bootstrap installs the guest/build prerequisites and runs Sysprep. Because the
+resulting Windows guests are isolated and disposable, the Windows template may
+suppress SmartScreen, PowerShell execution-policy prompts, Defender real-time
+build-path scanning, sleep, and automatic servicing that can interrupt a
+build. This exception is Windows-only and changes no Linux host, template,
+guest, or build security behavior. Do not weaken the provenance checks, PVE
+firewall boundary, SSH key-only access, UEFI, TPM, or clone/template lifecycle
+guards.
 
 Release publication and tagging remain deferred until both platform binaries
 pass their native gates. Manual TUI acceptance happens before the user declares

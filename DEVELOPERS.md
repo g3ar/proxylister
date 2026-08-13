@@ -134,7 +134,7 @@ src/proxytools/
 tests/                      offline Python tests for source application behavior
 release/pve/linux/          Linux PVE provisioning and build orchestration
 release/pve/linux/tests/    Linux PVE environment/infrastructure checks
-release/pve/windows/        Windows PVE workflow and its future tests
+release/pve/windows/        Windows PVE workflow and infrastructure tests
 ```
 
 Generated state is per clone and ignored by Git:

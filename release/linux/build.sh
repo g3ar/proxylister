@@ -9,7 +9,8 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 WORK="$ROOT/release/.work/local-linux"
-BIN="$ROOT/release/bin"
+BIN_ROOT="$ROOT/release/bin"
+BIN="$BIN_ROOT/linux"
 VENV="$WORK/venv"
 DIST="$WORK/artifacts"
 LOGS="$WORK/logs"
@@ -17,7 +18,7 @@ BUILD="$WORK/pyinstaller"
 CONSTRAINTS="$ROOT/release/linux/constraints.txt"
 
 rm -rf -- "$WORK" "$BIN"
-mkdir -p -- "$DIST" "$LOGS" "$BUILD"
+mkdir -p -- "$DIST" "$LOGS" "$BUILD" "$BIN_ROOT"
 
 exec 3>&1
 exec >"$LOGS/build.log" 2>&1

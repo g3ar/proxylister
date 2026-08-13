@@ -9,7 +9,8 @@ set -euo pipefail
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 WORK="$ROOT/release/.work/pve-linux"
-BIN="$ROOT/release/bin"
+BIN_ROOT="$ROOT/release/bin"
+BIN="$BIN_ROOT/linux"
 ARTIFACTS="$WORK/artifacts"
 LOGS="$WORK/logs"
 KNOWN_HOSTS="$WORK/known_hosts"
@@ -369,14 +370,14 @@ run_debian_build() {
         fail 'Debian build gate failed'
     fi
     if ! guest "$ip" \
-            'cd /home/builder/proxytools && ./release/linux/smoke-live.sh release/bin/proxytools' \
+            'cd /home/builder/proxytools && ./release/linux/smoke-live.sh release/bin/linux/proxytools' \
             >"$LOGS/debian/driver-live.log" 2>&1; then
         tail -n 120 "$LOGS/debian/driver-live.log" >&2
         fail 'Debian live-smoke gate failed'
     fi
 
     rsync -a --delete -e "$rsh" \
-        "builder@$ip:/home/builder/proxytools/release/bin/" "$ARTIFACTS/"
+        "builder@$ip:/home/builder/proxytools/release/bin/linux/" "$ARTIFACTS/"
     rsync -a -e "$rsh" \
         "builder@$ip:/home/builder/proxytools/release/.work/local-linux/logs/" \
         "$LOGS/debian/"
@@ -387,12 +388,12 @@ run_ubuntu_validation() {
     local ip=$1 rsh
     rsh=$(guest_rsh)
     transfer_source "$ip"
-    guest "$ip" 'mkdir -p /home/builder/proxytools/release/bin'
+    guest "$ip" 'mkdir -p /home/builder/proxytools/release/bin/linux'
     rsync -a --delete -e "$rsh" \
-        "$ARTIFACTS/" "builder@$ip:/home/builder/proxytools/release/bin/"
+        "$ARTIFACTS/" "builder@$ip:/home/builder/proxytools/release/bin/linux/"
 
     if ! guest "$ip" \
-            'set -eu; cd /home/builder/proxytools/release/bin; sha256sum -c SHA256SUMS; cd /home/builder/proxytools; ./release/linux/smoke.sh release/bin/proxytools; ./release/linux/smoke-live.sh release/bin/proxytools' \
+            'set -eu; cd /home/builder/proxytools/release/bin/linux; sha256sum -c SHA256SUMS; cd /home/builder/proxytools; ./release/linux/smoke.sh release/bin/linux/proxytools; ./release/linux/smoke-live.sh release/bin/linux/proxytools' \
             >"$LOGS/ubuntu/driver-validation.log" 2>&1; then
         tail -n 160 "$LOGS/ubuntu/driver-validation.log" >&2
         fail 'Ubuntu compatibility gate failed'
@@ -442,7 +443,7 @@ main() {
             || fail 'release mode requires a clean worktree, including no untracked files'
     fi
     rm -rf -- "$WORK" "$BIN"
-    mkdir -p -- "$ARTIFACTS" "$LOGS/debian" "$LOGS/ubuntu"
+    mkdir -p -- "$ARTIFACTS" "$LOGS/debian" "$LOGS/ubuntu" "$BIN_ROOT"
     touch "$KNOWN_HOSTS"
     chmod 0600 "$KNOWN_HOSTS"
     if (( RELEASE_MODE )); then

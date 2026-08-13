@@ -326,8 +326,8 @@ updates to `.gitignore`, cleanup code/tests, and user documentation.
   according to its audience.
 - `release/pve/linux/` contains all Linux PVE provisioning, build orchestration,
   and infrastructure tests.
-- `release/pve/windows/` is the exclusive home for future Windows PVE template,
-  build, and infrastructure-test work.
+- `release/pve/windows/` is the exclusive home for Windows PVE template, build,
+  and infrastructure-test work.
 - Module docstrings at the top of scripts should explain what the file is, why
   it exists, and how it is used.
 - CLI `--help` output is derived from the corresponding module documentation
@@ -352,14 +352,22 @@ checksummed source snapshot. Linux dependencies are locked in
 `release/linux/constraints.txt`; update that file only through an explicit,
 reviewed dependency refresh followed by a clean build and both smoke layers.
 
+Successful platform artifacts are isolated under `release/bin/linux/` and
+`release/bin/windows/`. Use the unsuffixed executable names `proxytools` and
+`proxytools.exe`; do not encode OS, architecture, or version in directory or
+executable names. Put those identities in each executable's metadata and in
+that platform's own manifest. Each platform owns and may replace only its own
+output directory and must preserve the other platform's artifacts.
+
 `release/linux/build.sh` always runs deterministic offline frozen smoke tests.
 `release/linux/smoke-live.sh` is a separate bounded network check and must not
 be folded into the ordinary contributor build gate.
 
 Preserve `.work` after builds for diagnostics. `release/linux/build.sh` removes
-the previous ignored `release/bin/` at startup and promotes the complete latest
-artifact set there only after a successful build and offline smoke. Do not
-commit either directory or treat a dirty-worktree artifact as publishable.
+the previous ignored `release/bin/linux/` at startup and promotes the complete
+latest Linux artifact set there only after a successful build and offline
+smoke. It must preserve `release/bin/windows/`. Do not commit either output or
+treat a dirty-worktree artifact as publishable.
 Live-smoke output belongs in `.work/local-linux/logs/` and must survive a
 failed check. The distributed Linux set includes the executable, end-user
 README, MIT `LICENSE`, manifest, and checksums. Each frozen build embeds its
@@ -398,7 +406,7 @@ It builds the current worktree in a disposable Debian clone, validates the same
 artifact through offline and live smoke in Ubuntu, retrieves artifacts/logs,
 deletes only successful exact clones, and retains the active clone on failure.
 Its generated state belongs under `release/.work/pve-linux/`; the artifact is
-promoted to `release/bin/` only after both OS gates pass.
+promoted to `release/bin/linux/` only after both OS gates pass.
 Its normal mode transfers the current worktree for development. Its explicit
 `--release` mode requires a completely clean worktree, creates one checksummed
 `git archive` from `HEAD`, and verifies that same archive in both guests.
@@ -458,8 +466,41 @@ authorized project operation and continue when access is granted.
 Remote Linux orchestration is implemented and proven under `release/pve/linux/`.
 Windows PVE work belongs only under `release/pve/windows/`: use the Linux
 provisioner as the lifecycle/safety reference, keep guest-specific mechanics
-narrow, and do not add or run Windows project packaging until the template is
-repeatable and the user accepts it.
+narrow. The template stage is complete; Windows project packaging is the next
+unimplemented stage and must not be inferred from template acceptance alone.
+
+Provision the Windows template only from pinned official sources: Microsoft
+Windows 11 Enterprise Evaluation x64 media plus Microsoft's published SHA256,
+the versioned stable upstream virtio-win media, Microsoft's Win32-OpenSSH
+implementation delivered as a version-pinned MSI from the official
+PowerShell/Win32-OpenSSH release repository and verified against its published
+GitHub release digest, and a pinned python.org Python 3.13 x64 installer plus
+its published SHA256. Do not use the network-dependent Windows OpenSSH optional
+capability: its Windows Update servicing path is slow and non-deterministic in
+template provisioning. Never substitute a third-party Windows image, download
+mirror, generic package bootstrap service, or floating `latest` artifact.
+Retain every verified source artifact in the PVE media cache. Do not run
+cumulative Windows Update for the short-lived build template; install only
+required components and pinned tools, suppress automatic OS updates/reboots in
+clones, and refresh the template deliberately from newer verified Microsoft
+evaluation media when its age or expiry requires it.
+
+Keep Windows unattended setup minimal and move guest preparation into one
+audited PowerShell bootstrap before Sysprep. The Windows build guests are
+isolated, disposable appliances, so suppress security/UI mechanisms that only
+interrupt automated builds (including SmartScreen, execution-policy prompts,
+Defender real-time scanning of build paths, sleep, and automatic servicing).
+This security-relaxation exception applies only to the Windows template and
+its disposable Windows clones; never carry it into Linux hosts, templates,
+guests, or build workflows. Keep SSH key-only access and the PVE firewall; do
+not bypass official-source checks, UEFI/TPM, exact cleanup guards, or template
+validation.
+
+Windows template VMID `9002` is the current stopped, protected base after a
+successful unattended install, ready-marker/Sysprep gate, linked-clone guest
+validation, and external SSH key-login check. The provisioning workflow is
+implemented and the template has been accepted. Do not boot, modify, unprotect,
+or delete `9002` during ordinary build work. Use disposable linked clones.
 
 The supported standalone scope is:
 
