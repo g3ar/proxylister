@@ -161,7 +161,11 @@ class ProxyLibraryTests(unittest.TestCase):
             release_browser.wait(2)
             return result
 
-        with patch.object(list_command, "load_config", return_value=settings), patch.object(
+        with tempfile.TemporaryDirectory() as runtime, patch.dict(
+            os.environ, {"PROXYLISTER_HOME": runtime}
+        ), patch.object(
+            list_command, "load_config", return_value=settings
+        ), patch.object(
             list_command, "fetch_all_proxies", return_value=candidates
         ), patch.object(
             list_command, "check_candidate",
@@ -182,6 +186,11 @@ class ProxyLibraryTests(unittest.TestCase):
             self.assertEqual(browser_submissions, 1)
             release_browser.set()
             runner.join(3)
+
+            self.assertCountEqual(
+                (Path(runtime) / "working_proxies.txt").read_text().splitlines(),
+                [f"http://192.0.2.{index}:80" for index in range(1, 4)],
+            )
 
         self.assertFalse(runner.is_alive())
         self.assertEqual(browser_submissions, len(candidates))
