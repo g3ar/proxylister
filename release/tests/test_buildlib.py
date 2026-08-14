@@ -17,7 +17,7 @@ ROOT = RELEASE.parent
 sys.path.insert(0, os.fspath(RELEASE))
 
 from buildlib.core import BuildError, promote_directory, verify_checksums, write_checksums
-from buildlib.pve import PVEManager
+from buildlib.pve import PVEManager, SSHConfig, configured_pve_destination
 from buildlib.provision import WINDOWS_MEDIA, WindowsProvisioner
 from buildlib.source import create_snapshot, verify_snapshot
 
@@ -85,6 +85,25 @@ class FakePVE:
         if command[:2] == ("qm", "destroy"):
             return ""
         raise AssertionError(f"unexpected fake PVE command: {command}")
+
+
+class SSHConfigTests(unittest.TestCase):
+    def test_pve_host_comes_from_python_config_and_always_uses_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary, patch(
+            "buildlib.pve.PVE_HOST", "pve-build.example"
+        ), patch.dict(
+            os.environ,
+            {"PROXYLISTER_PVE_HOST": "ignored.example"},
+            clear=True,
+        ):
+            config = SSHConfig.from_environment(Path(temporary))
+        self.assertEqual(config.pve_host, "root@pve-build.example")
+
+    def test_pve_host_rejects_a_user_or_whitespace(self) -> None:
+        for value in ("", "root@pve-build.example", "pve build"):
+            with self.subTest(value=value), patch("buildlib.pve.PVE_HOST", value):
+                with self.assertRaisesRegex(BuildError, "hostname or IP address"):
+                    configured_pve_destination()
 
 
 class PVESafetyTests(unittest.TestCase):

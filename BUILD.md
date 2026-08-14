@@ -117,8 +117,10 @@ after failure. Interactive browser and TUI acceptance remain manual.
 
 ## PVE Linux build
 
-The maintainer host is `root@192.168.66.2`. PVE is not required for ordinary
-development. The build lab uses these stopped, protected, immutable templates:
+The maintainer host is configured by `PVE_HOST` in `release/build_config.py` and
+is always accessed as `root`. Change that one value when the dedicated PVE
+build-lab server moves. PVE is not required for ordinary development. The build
+lab uses these stopped, protected, immutable templates:
 
 | VMID | Name | Purpose |
 |---|---|---|
@@ -150,11 +152,17 @@ run, only exact unprotected non-template clones named
 reconciled automatically. Unrelated VMs and protected templates are never
 cleanup targets.
 
-Logs remain under `release/.work/pve-linux/logs/{debian,ubuntu}/`. Override
-connection defaults without editing the code when necessary:
+Logs remain under `release/.work/pve-linux/logs/{debian,ubuntu}/`. The PVE host
+has one source of truth:
+
+```python
+# release/build_config.py
+PVE_HOST = "PVE_HOST_OR_IP"
+```
+
+Override credential paths without editing the code when necessary:
 
 ```bash
-PROXYLISTER_PVE_HOST=root@PVE_HOST \
 PROXYLISTER_PVE_ROOT_KEY=/path/to/pve-root-key \
 PROXYLISTER_PVE_GUEST_KEY=/path/to/proxylister-build-key \
 PROXYLISTER_PVE_KNOWN_HOSTS=/path/to/known_hosts \

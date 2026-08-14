@@ -133,6 +133,7 @@ src/proxylister/
     dashboard_widgets.py    filter and analytics modals
 tests/                      offline Python tests for source application behavior
 release/build.py            cross-platform build and PVE entrypoint
+release/build_config.py     site-specific PVE host address
 release/buildlib/           shared native-build, transport, lifecycle, and provisioning code
 release/smoke.py            cross-platform frozen offline/live smoke
 release/tests/              offline build guards and explicit PVE audit checks

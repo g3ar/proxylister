@@ -136,6 +136,10 @@ def _provision_remote(args: argparse.Namespace) -> int:
     bundle = work / "provision.tar"
     with tarfile.open(bundle, "w") as archive:
         archive.add(SCRIPT_DIR / "build.py", arcname="release/build.py")
+        archive.add(
+            SCRIPT_DIR / "build_config.py",
+            arcname="release/build_config.py",
+        )
         archive.add(SCRIPT_DIR / "buildlib", arcname="release/buildlib")
         if args.target == "windows":
             archive.add(

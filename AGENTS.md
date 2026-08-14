@@ -382,10 +382,12 @@ failed check. The distributed Linux set includes the executable, end-user
 README, MIT `LICENSE`, manifest, and checksums. Each frozen build embeds its
 exact UTC build time and source commit for `--about`.
 
-The PVE server is `root@192.168.66.2`; Linux template `9000` is stopped,
-protected, and immutable between explicit maintenance sessions. Never build in
-the template or delete it. Build only in a disposable linked clone and apply
-the validation and cleanup guards in `BUILD.md` and the orchestrator.
+The dedicated PVE server address has one source of truth: `PVE_HOST` in
+`release/build_config.py`. It is always accessed as `root`. Linux template
+`9000` is stopped, protected, and immutable between explicit maintenance
+sessions. Never build in the template or delete it. Build only in a disposable
+linked clone and apply the validation and cleanup guards in `BUILD.md` and the
+orchestrator.
 Ubuntu 24.04 LTS compatibility template `9001` is also stopped, protected, and
 immutable. It is for running the returned standalone artifact in a disposable
 linked clone, not for producing a second Linux build. Never boot or delete
@@ -438,14 +440,16 @@ The protected PVE templates and shared host lock retain their former physical
 public product naming. Code may accept those exact legacy identities only for
 template validation, cross-worktree locking, stale-clone reconciliation, and
 credential migration; all new clones and product artifacts use `proxylister`.
-The dedicated PVE build server `root@192.168.66.2` exists specifically so
-agents can perform project build-lab work autonomously. Once the user requests
-a PVE, template, build, test, validation, repair, or release-lab task, that
-request is standing authorization to do everything reasonably required on this
-one server to finish the task. Do not ask for confirmation for intermediate PVE
-actions and do not make the user supervise the VM lifecycle. This authorization
-applies only to `root@192.168.66.2`; it does not extend to any other PVE host,
-server, workstation, external service, or infrastructure.
+The dedicated PVE build server configured in `release/build_config.py` exists
+specifically so agents can perform project build-lab work autonomously as
+`root`. Once the user requests a PVE, template, build, test, validation, repair,
+or release-lab task, that request is standing authorization to do everything
+reasonably required on that configured server to finish the task. Do not ask
+for confirmation for intermediate PVE actions and do not make the user
+supervise the VM lifecycle. This authorization follows a deliberate change of
+`PVE_HOST` and applies only to that configured dedicated PVE build server; it
+does not extend to any other host, server, workstation, external service, or
+infrastructure.
 
 Proceed without further permission for SSH/SCP/rsync; uploading the required
 public SSH keys, scripts, source, and artifacts; installing packages; changing

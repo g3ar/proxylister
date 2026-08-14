@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Protocol, Sequence
 
+from build_config import PVE_HOST
+
 from .core import BuildError, LEGACY_PVE_LOCK_PATH, command_text, run
 
 
@@ -24,6 +26,21 @@ IPV4 = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}$")
 
 class PVECommand(Protocol):
     def command(self, args: Sequence[str], *, check: bool = True) -> str: ...
+
+
+def configured_pve_destination() -> str:
+    """Return the configured build host with the mandatory root SSH user."""
+    host = PVE_HOST.strip()
+    if (
+        not host
+        or host != PVE_HOST
+        or "@" in host
+        or any(char.isspace() for char in host)
+    ):
+        raise BuildError(
+            "release/build_config.py PVE_HOST must contain only a hostname or IP address"
+        )
+    return f"root@{host}"
 
 
 @dataclass(frozen=True)
@@ -45,8 +62,7 @@ class SSHConfig:
             else former_guest_key
         )
         return cls(
-            pve_host=os.environ.get("PROXYLISTER_PVE_HOST")
-            or os.environ.get("PROXYTOOLS_PVE_HOST", "root@192.168.66.2"),
+            pve_host=configured_pve_destination(),
             pve_key=Path(
                 os.environ.get("PROXYLISTER_PVE_ROOT_KEY")
                 or os.environ.get("PROXYTOOLS_PVE_ROOT_KEY", home / ".ssh/id_rsa")
