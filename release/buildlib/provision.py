@@ -344,10 +344,6 @@ WINDOWS_DESCRIPTION = (
     "Windows 11 Enterprise Evaluation 25H2 immutable ProxyLister ready-state-v1 "
     "builder template; official pinned media; no cumulative update pass"
 )
-LEGACY_WINDOWS_DESCRIPTION = (
-    "Windows 11 Enterprise Evaluation 25H2 immutable Proxy Tools ready-state-v1 "
-    "builder template; official pinned media; no cumulative update pass"
-)
 WINDOWS_MEMORY = "4096"
 WINDOWS_MEDIA = (
     (
@@ -421,10 +417,7 @@ class WindowsProvisioner:
         for key, value in expected.items():
             if config.get(key) != value:
                 raise BuildError(f"Windows template has unexpected {key}")
-        if config.get("description") not in {
-            WINDOWS_DESCRIPTION,
-            LEGACY_WINDOWS_DESCRIPTION,
-        }:
+        if config.get("description") != WINDOWS_DESCRIPTION:
             raise BuildError("Windows template has unexpected description")
         if require_protection and config.get("protection") != "1":
             raise BuildError("Windows template is not protected")
@@ -480,8 +473,7 @@ class WindowsProvisioner:
                 ready = guest_powershell(
                     self.backend,
                     vmid,
-                    r"if (-not ((Test-Path C:\proxylister-template-ready.json) -or "
-                    r"(Test-Path C:\proxytools-template-ready.json))) { exit 1 }",
+                    r"if (-not (Test-Path C:\proxylister-template-ready.json)) { exit 1 }",
                     check=False,
                 ) or ready
             time.sleep(5)
@@ -500,10 +492,8 @@ class WindowsProvisioner:
             vmid,
             r"""
 $ErrorActionPreference='Stop'
-$marker=@('C:\proxylister-template-ready.json','C:\proxytools-template-ready.json') |
-    Where-Object { Test-Path $_ } | Select-Object -First 1
-if (-not $marker) { throw 'ready marker missing' }
-$ready=Get-Content $marker -Raw | ConvertFrom-Json
+if (-not (Test-Path C:\proxylister-template-ready.json)) { throw 'ready marker missing' }
+$ready=Get-Content C:\proxylister-template-ready.json -Raw | ConvertFrom-Json
 if ($ready.template_mode -ne 'ready-state-v1') { throw 'unexpected template mode' }
 if ((Get-Service QEMU-GA).Status -ne 'Running') { throw 'QGA stopped' }
 if ((Get-Service sshd).Status -ne 'Running') { throw 'sshd stopped' }

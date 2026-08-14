@@ -141,7 +141,7 @@ class PVESafetyTests(unittest.TestCase):
                 with self.assertRaisesRegex(BuildError, message):
                     self.manager.remove_owned_clone(vmid, f"proxylister-debian-build-{vmid}")
         with self.assertRaisesRegex(BuildError, "protected template VMID"):
-            self.manager.remove_owned_clone(9000, "proxytools-linux-template")
+            self.manager.remove_owned_clone(9000, "proxylister-linux-template")
 
     def test_unaddressable_cached_media_reference_fails_closed(self) -> None:
         self.backend.add(
@@ -177,8 +177,8 @@ class SnapshotTests(unittest.TestCase):
             (root / "release/bin/windows/proxylister.exe").write_text("generated")
             (root / "release/.work/old").mkdir(parents=True)
             (root / "release/.work/old/log").write_text("generated")
-            (root / "src/proxytools.egg-info").mkdir()
-            (root / "src/proxytools.egg-info/PKG-INFO").write_text("generated")
+            (root / "src/proxylister.egg-info").mkdir()
+            (root / "src/proxylister.egg-info/PKG-INFO").write_text("generated")
             (root / "untracked.txt").write_text("included")
             snapshot = create_snapshot(root, parent / "work", release=False)
             verify_snapshot(snapshot)
@@ -222,7 +222,7 @@ class WindowsProvisionTests(unittest.TestCase):
         backend = FakePVE()
         backend.add(
             9002,
-            "proxytools-windows-template",
+            "proxylister-windows-template",
             template="1",
             protection="0",
             extra=(
@@ -235,9 +235,9 @@ class WindowsProvisionTests(unittest.TestCase):
         provisioner.backend = backend  # type: ignore[assignment]
         provisioner.pve = PVEManager(backend, protected_vmids={9000, 9001, 9002})
         with self.assertRaisesRegex(BuildError, "refusing to purge template"):
-            provisioner.purge_candidate(9002, "proxytools-windows-template")
+            provisioner.purge_candidate(9002, "proxylister-windows-template")
         provisioner.purge_candidate(
-            9002, "proxytools-windows-template", allow_template=True
+            9002, "proxylister-windows-template", allow_template=True
         )
         self.assertIn(("qm", "set", "9002", "--delete", "ide0"), backend.commands)
         self.assertIn(("qm", "set", "9002", "--delete", "ide2"), backend.commands)
@@ -265,7 +265,7 @@ class WindowsProvisionTests(unittest.TestCase):
 
     def test_ready_marker_must_be_seen_before_candidate_shutdown(self) -> None:
         backend = FakePVE()
-        backend.add(9002, "proxytools-windows-template", status="stopped")
+        backend.add(9002, "proxylister-windows-template", status="stopped")
         provisioner = WindowsProvisioner(RELEASE / "pve/windows", None, check_only=False)
         provisioner.backend = backend  # type: ignore[assignment]
         provisioner.pve = PVEManager(backend, protected_vmids={9000, 9001, 9002})

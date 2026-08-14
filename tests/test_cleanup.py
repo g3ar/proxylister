@@ -16,15 +16,14 @@ class CleanupTests(unittest.TestCase):
             home = Path(directory)
             generated_files = (
                 "proxylister.db", "proxylister.db-wal", "proxylister-geoip.mmdb",
-                "proxylister-geoip.version", "proxytools.db", "proxytools.lock",
-                "proxytools-geoip.mmdb", "working_proxies.txt", ".coverage",
+                "proxylister-geoip.version", "proxylister.lock",
+                "working_proxies.txt", ".coverage",
             )
             for name in generated_files:
                 (home / name).write_text("generated")
             for name in (
                 "proxydb/proxylister.db", "proxydb/proxylister.db-wal",
-                "proxydb/proxylister.db-shm", "proxydb/proxytools.db",
-                "proxydb/proxytools.lock", "geodb/geoip.mmdb", "geodb/version",
+                "proxydb/proxylister.db-shm", "geodb/geoip.mmdb", "geodb/version",
             ):
                 path = home / name
                 path.parent.mkdir(exist_ok=True)
@@ -36,7 +35,6 @@ class CleanupTests(unittest.TestCase):
             (home / ".env").write_text("SECRET=preserved")
             (home / "results.txt").write_text("preserved")
             (home / ".proxylister-geoip-interrupted").write_text("generated")
-            (home / ".proxytools-geoip-interrupted").write_text("generated")
 
             cleanup.clear_runtime(home)
 
@@ -45,11 +43,19 @@ class CleanupTests(unittest.TestCase):
             self.assertFalse((home / ".venv").exists())
             self.assertFalse((home / "src/pkg/__pycache__").exists())
             self.assertFalse((home / ".proxylister-geoip-interrupted").exists())
-            self.assertFalse((home / ".proxytools-geoip-interrupted").exists())
             self.assertFalse((home / "proxydb").exists())
             self.assertFalse((home / "geodb").exists())
             self.assertTrue((home / ".env").exists())
             self.assertTrue((home / "results.txt").exists())
+
+    def test_clear_runtime_leaves_the_active_lock_for_its_owner(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            lock = home / "proxydb" / "proxylister.lock"
+            lock.parent.mkdir()
+            with ProcessLock("clear", lock):
+                cleanup.clear_runtime(home)
+                self.assertTrue(lock.exists())
 
     def test_clear_refuses_while_clone_is_locked(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(

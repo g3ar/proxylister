@@ -12,7 +12,7 @@ RELEASE = Path(__file__).resolve().parents[1]
 ROOT = RELEASE.parent
 sys.path.insert(0, os.fspath(RELEASE))
 
-from buildlib.core import BuildError, LEGACY_PVE_LOCK_PATH, run  # noqa: E402
+from buildlib.core import BuildError, PVE_LOCK_PATH, run  # noqa: E402
 from buildlib.pve import SSHPVE, SSHConfig  # noqa: E402
 
 
@@ -31,7 +31,7 @@ def snapshot(backend: SSHPVE, target: str) -> str:
         "os.stat(p).st_mode,os.stat(p).st_size,os.stat(p).st_mtime_ns))(p) for p in paths];"
         "[(lambda d:print('dir',d,[(e.name,e.stat().st_mode,e.stat().st_size,e.stat().st_mtime_ns) "
         "for e in sorted(os.scandir(d),key=lambda x:x.name)]))(d) for d in directories];"
-        f"p={os.fspath(LEGACY_PVE_LOCK_PATH)!r};"
+        f"p={os.fspath(PVE_LOCK_PATH)!r};"
         "print('lock',pathlib.Path(p).read_text() if os.path.exists(p) else 'absent',"
         "os.stat(p).st_mtime_ns if os.path.exists(p) else 0)"
     )

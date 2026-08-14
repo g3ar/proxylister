@@ -108,8 +108,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 Set-Service -Name sshd -StartupType Automatic
 Start-Service -Name sshd
-if (-not (Get-NetFirewallRule -Name "ProxyTools-OpenSSH" -ErrorAction SilentlyContinue)) {
-    New-NetFirewallRule -Name "ProxyTools-OpenSSH" -DisplayName "ProxyTools OpenSSH" `
+if (-not (Get-NetFirewallRule -Name "ProxyLister-OpenSSH" -ErrorAction SilentlyContinue)) {
+    New-NetFirewallRule -Name "ProxyLister-OpenSSH" -DisplayName "ProxyLister OpenSSH" `
         -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 | Out-Null
 }
 

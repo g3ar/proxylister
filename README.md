@@ -371,10 +371,9 @@ geodb/
 
 `proxydb/` contains monitor history and the per-clone process lock. `geodb/` contains the automatically downloaded monthly DB-IP City Lite database. Both directories are ignored by Git.
 
-Existing database, lock, GeoIP, and configuration files named `proxytools*`
-are moved to their `proxylister` names automatically. The migration preserves
-the SQLite database and user-edited configuration; it does not create a second
-runtime state.
+Existing root-level database, lock, and GeoIP files are moved into these
+directories automatically. The migration preserves the SQLite database and
+does not create a second runtime state.
 
 Each clone has its own state. Two separate clones may run simultaneously, but two working ProxyLister commands cannot run from the same clone at the same time.
 
@@ -391,7 +390,7 @@ This returns the directory to its freshly cloned runtime state by removing:
 - the downloaded GeoIP database in `geodb/`;
 - the automatically saved `working_proxies.txt` list;
 - Python bytecode and common test/build caches;
-- legacy generated files from older versions.
+- generated files from earlier local runs.
 
 Source files, Git metadata, `.env` files, and arbitrary redirected user output are preserved. The deleted runtime state cannot be recovered. Cleanup refuses to run while another command owns the clone lock.
 

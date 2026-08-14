@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Sequence
 
-from .core import BuildError, LEGACY_PVE_LOCK_PATH, run
+from .core import BuildError, PVE_LOCK_PATH, run
 
 
 class LocalPVE:
@@ -24,7 +24,7 @@ class LocalPVE:
 
 
 class HostLock:
-    def __init__(self, path: Path = LEGACY_PVE_LOCK_PATH):
+    def __init__(self, path: Path = PVE_LOCK_PATH):
         self.path = path
         self.stream: object | None = None
 

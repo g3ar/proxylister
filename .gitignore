@@ -23,13 +23,6 @@ proxylister.db-shm
 proxylister.lock
 proxylister-geoip.mmdb
 proxylister-geoip.version
-# Legacy names are ignored until first-run migration moves or clears them.
-proxytools.db
-proxytools.db-wal
-proxytools.db-shm
-proxytools.lock
-proxytools-geoip.mmdb
-proxytools-geoip.version
 proxydb/
 geodb/
 release/.work/

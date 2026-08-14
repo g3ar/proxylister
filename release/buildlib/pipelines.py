@@ -15,11 +15,11 @@ from .source import SourceSnapshot
 
 
 DEBIAN_TEMPLATE = 9000
-DEBIAN_TEMPLATE_NAME = "proxytools-linux-template"
+DEBIAN_TEMPLATE_NAME = "proxylister-linux-template"
 UBUNTU_TEMPLATE = 9001
-UBUNTU_TEMPLATE_NAME = "proxytools-ubuntu-2404-check-template"
+UBUNTU_TEMPLATE_NAME = "proxylister-ubuntu-2404-check-template"
 WINDOWS_TEMPLATE = 9002
-WINDOWS_TEMPLATE_NAME = "proxytools-windows-template"
+WINDOWS_TEMPLATE_NAME = "proxylister-windows-template"
 PROTECTED_VMIDS = {DEBIAN_TEMPLATE, UBUNTU_TEMPLATE, WINDOWS_TEMPLATE}
 
 
@@ -102,10 +102,8 @@ class PVEBuildContext:
             ip,
             r"""
 $ErrorActionPreference='Stop'
-$marker=@('C:\proxylister-template-ready.json','C:\proxytools-template-ready.json') |
-    Where-Object { Test-Path $_ } | Select-Object -First 1
-if (-not $marker) { throw 'ready marker missing' }
-$ready=Get-Content $marker -Raw | ConvertFrom-Json
+if (-not (Test-Path C:\proxylister-template-ready.json)) { throw 'ready marker missing' }
+$ready=Get-Content C:\proxylister-template-ready.json -Raw | ConvertFrom-Json
 if ($ready.template_mode -ne 'ready-state-v1') { throw 'unexpected template mode' }
 if ((Get-Service QEMU-GA).Status -ne 'Running') { throw 'QGA stopped' }
 if ((Get-Service sshd).Status -ne 'Running') { throw 'sshd stopped' }
@@ -277,8 +275,6 @@ def pve_linux_build(root: Path, snapshot: SourceSnapshot) -> Path:
     context.cleanup_stale((
         "proxylister-debian-build",
         "proxylister-ubuntu-validation",
-        "proxytools-debian-build",
-        "proxytools-ubuntu-validation",
     ))
     try:
         debian = context.create_clone(
@@ -343,10 +339,7 @@ def pve_windows_build(root: Path, snapshot: SourceSnapshot) -> Path:
     context = PVEBuildContext(root, "windows", snapshot)
     context.prepare(("guest",))
     context.pve.validate_template(WINDOWS_TEMPLATE, WINDOWS_TEMPLATE_NAME)
-    context.cleanup_stale(
-        ("proxylister-windows-build", "proxytools-windows-build"),
-        windows=True,
-    )
+    context.cleanup_stale(("proxylister-windows-build",), windows=True)
     try:
         clone = context.create_clone(
             WINDOWS_TEMPLATE,

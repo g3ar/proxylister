@@ -15,8 +15,8 @@ class BuildError(RuntimeError):
     """A user-facing build or infrastructure failure."""
 
 
-# All worktrees, including older ones, must contend on the same host lock.
-LEGACY_PVE_LOCK_PATH = Path("/run/lock/proxytools-pve-build.lock")
+# Every build and provisioning operation contends on the same host lock.
+PVE_LOCK_PATH = Path("/run/lock/proxylister-pve-build.lock")
 
 
 def command_text(args: Sequence[object]) -> str:

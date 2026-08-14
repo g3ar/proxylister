@@ -17,7 +17,7 @@ from typing import Iterable, Protocol, Sequence
 
 from build_config import PVE_HOST
 
-from .core import BuildError, LEGACY_PVE_LOCK_PATH, command_text, run
+from .core import BuildError, PVE_LOCK_PATH, command_text, run
 
 
 MEDIA_SLOT = re.compile(r"^(?:ide|sata|scsi|virtio|unused)\d+$")
@@ -54,26 +54,20 @@ class SSHConfig:
     @classmethod
     def from_environment(cls, work: Path) -> "SSHConfig":
         home = Path.home()
-        current_guest_key = home / ".ssh/proxylister-build"
-        former_guest_key = home / ".ssh/proxytools-build"
-        default_guest_key = (
-            current_guest_key
-            if current_guest_key.exists() or not former_guest_key.exists()
-            else former_guest_key
-        )
         return cls(
             pve_host=configured_pve_destination(),
             pve_key=Path(
-                os.environ.get("PROXYLISTER_PVE_ROOT_KEY")
-                or os.environ.get("PROXYTOOLS_PVE_ROOT_KEY", home / ".ssh/id_rsa")
+                os.environ.get("PROXYLISTER_PVE_ROOT_KEY", home / ".ssh/id_rsa")
             ).expanduser(),
             guest_key=Path(
-                os.environ.get("PROXYLISTER_PVE_GUEST_KEY")
-                or os.environ.get("PROXYTOOLS_PVE_GUEST_KEY", default_guest_key)
+                os.environ.get(
+                    "PROXYLISTER_PVE_GUEST_KEY", home / ".ssh/proxylister-build"
+                )
             ).expanduser(),
             pve_known_hosts=Path(
-                os.environ.get("PROXYLISTER_PVE_KNOWN_HOSTS")
-                or os.environ.get("PROXYTOOLS_PVE_KNOWN_HOSTS", home / ".ssh/known_hosts")
+                os.environ.get(
+                    "PROXYLISTER_PVE_KNOWN_HOSTS", home / ".ssh/known_hosts"
+                )
             ).expanduser(),
             guest_known_hosts=work / "known_hosts",
         )
@@ -144,7 +138,7 @@ class PVELock:
 
     def acquire(self) -> None:
         remote = (
-            f"exec 9>{LEGACY_PVE_LOCK_PATH}; "
+            f"exec 9>{PVE_LOCK_PATH}; "
             "flock -n 9 || exit 73; "
             "printf 'pid=%s started=%s\\n' \"$$\" \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >&9; "
             "printf 'LOCKED\\n'; cat >/dev/null"

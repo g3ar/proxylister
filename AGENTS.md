@@ -432,14 +432,10 @@ cleanup, or host-validation behavior. The root `tests/` directory contains
 only Python tests for source application behavior.
 Before a new run, it must reconcile clones retained by previous failures: only
 exact unprotected non-template names `proxylister-debian-build-VMID` and
-`proxylister-ubuntu-validation-VMID`, plus their exact former-name equivalents,
-may be shut down and deleted automatically. Never weaken these guards or allow
-stale clones to accumulate across reruns.
-The protected PVE templates and shared host lock retain their former physical
-`proxytools-*` identifiers: they are existing verified infrastructure, not
-public product naming. Code may accept those exact legacy identities only for
-template validation, cross-worktree locking, stale-clone reconciliation, and
-credential migration; all new clones and product artifacts use `proxylister`.
+`proxylister-ubuntu-validation-VMID` may be shut down and deleted automatically.
+Never weaken these guards or allow stale clones to accumulate across reruns.
+Protected template names, the shared host lock, disposable clones, and product
+artifacts all use the `proxylister` project name.
 The dedicated PVE build server configured in `release/build_config.py` exists
 specifically so agents can perform project build-lab work autonomously as
 `root`. Once the user requests a PVE, template, build, test, validation, repair,

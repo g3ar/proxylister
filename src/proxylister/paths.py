@@ -5,7 +5,7 @@ lock relative to that canonical directory lets two separate clones operate
 independently while every invocation of one clone shares the same state.
 Proxy history lives under ``proxydb/`` and GeoIP data under ``geodb/`` so the
 project root contains only source and user-facing files. Runtime files created
-under the former project name are moved into the current layout on first access.
+at the project root are moved into the current directory layout on first access.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import sys
 
 def tool_home() -> Path:
     """Return the canonical directory containing the ``proxylister`` launcher."""
-    configured = os.environ.get("PROXYLISTER_HOME") or os.environ.get("PROXYTOOLS_HOME")
+    configured = os.environ.get("PROXYLISTER_HOME")
     if configured:
         return Path(configured).resolve()
     if getattr(sys, "frozen", False):
@@ -40,7 +40,6 @@ def _migrate_first(target: Path, *legacy_names: str) -> Path:
 
 def install_default_config(target: Path) -> None:
     """Create the external config from the copy bundled in a frozen binary."""
-    _migrate_first(target, "proxytools.conf")
     if target.exists() or not getattr(sys, "frozen", False):
         return
     bundle = Path(getattr(sys, "_MEIPASS")) / "proxylister.conf"
@@ -62,8 +61,6 @@ def database_path() -> Path:
     for suffix in ("", "-wal", "-shm"):
         _migrate_first(
             directory / f"proxylister.db{suffix}",
-            f"proxydb/proxytools.db{suffix}",
-            f"proxytools.db{suffix}",
             f"proxylister.db{suffix}",
         )
     return directory / "proxylister.db"
@@ -72,8 +69,6 @@ def database_path() -> Path:
 def lock_path() -> Path:
     return _migrate_first(
         _runtime_directory("proxydb") / "proxylister.lock",
-        "proxydb/proxytools.lock",
-        "proxytools.lock",
         "proxylister.lock",
     )
 
@@ -81,7 +76,6 @@ def lock_path() -> Path:
 def geoip_database_path() -> Path:
     return _migrate_first(
         _runtime_directory("geodb") / "geoip.mmdb",
-        "proxytools-geoip.mmdb",
         "proxylister-geoip.mmdb",
     )
 
@@ -89,7 +83,6 @@ def geoip_database_path() -> Path:
 def geoip_version_path() -> Path:
     return _migrate_first(
         _runtime_directory("geodb") / "version",
-        "proxytools-geoip.version",
         "proxylister-geoip.version",
     )
 

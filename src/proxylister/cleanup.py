@@ -19,21 +19,12 @@ RUNTIME_FILES = (
     "proxydb/proxylister.db",
     "proxydb/proxylister.db-wal",
     "proxydb/proxylister.db-shm",
-    "proxydb/proxytools.db",
-    "proxydb/proxytools.db-wal",
-    "proxydb/proxytools.db-shm",
-    "proxydb/proxytools.lock",
     "proxylister.db",
     "proxylister.db-wal",
     "proxylister.db-shm",
+    "proxylister.lock",
     "proxylister-geoip.mmdb",
     "proxylister-geoip.version",
-    "proxytools.db",
-    "proxytools.db-wal",
-    "proxytools.db-shm",
-    "proxytools.lock",
-    "proxytools-geoip.mmdb",
-    "proxytools-geoip.version",
     "working_proxies.txt",
     ".coverage",
 )
@@ -74,9 +65,8 @@ def clear_runtime(home: Path | None = None) -> list[Path]:
         for path in home.rglob(pattern):
             if ".git" not in path.parts:
                 _remove(path, removed)
-    for pattern in (".proxylister-geoip-*", ".proxytools-geoip-*"):
-        for path in home.glob(pattern):
-            _remove(path, removed)
+    for path in home.glob(".proxylister-geoip-*"):
+        _remove(path, removed)
     proxy_directory = home / "proxydb"
     if proxy_directory.is_dir() and not any(proxy_directory.iterdir()):
         proxy_directory.rmdir()

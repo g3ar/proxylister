@@ -93,27 +93,13 @@ def _dependencies_are_current(root: Path, python: Path, stamp: Path) -> bool:
 def _prepare_environment(root: Path) -> Path:
     venv = root / ".venv"
     python = _venv_python(venv)
-    legacy_metadata = root / "src/proxytools.egg-info"
-    if legacy_metadata.is_dir() and not legacy_metadata.is_symlink():
-        shutil.rmtree(legacy_metadata)
-    elif legacy_metadata.exists() or legacy_metadata.is_symlink():
-        legacy_metadata.unlink()
     if not python.is_file():
         print(f"Creating local Python environment in {venv} ...", file=sys.stderr)
         subprocess.run([sys.executable, "-m", "venv", venv], check=True)
     stamp = venv / ".proxylister-package-metadata"
-    legacy_stamp = venv / ".proxytools-package-metadata"
-    if not stamp.exists() and legacy_stamp.exists():
-        legacy_stamp.replace(stamp)
     if not _dependencies_are_current(root, python, stamp):
         print("Installing dependencies ...", file=sys.stderr)
         subprocess.run([python, "-m", "pip", "install", "-e", root], check=True)
-        subprocess.run(
-            [python, "-m", "pip", "uninstall", "-y", "proxytools"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
         shutil.copy2(root / "pyproject.toml", stamp)
     return python
 

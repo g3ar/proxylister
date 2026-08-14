@@ -124,14 +124,11 @@ lab uses these stopped, protected, immutable templates:
 
 | VMID | Name | Purpose |
 |---|---|---|
-| `9000` | `proxytools-linux-template` | Debian 13 native build and test |
-| `9001` | `proxytools-ubuntu-2404-check-template` | Ubuntu 24.04 LTS compatibility smoke |
+| `9000` | `proxylister-linux-template` | Debian 13 native build and test |
+| `9001` | `proxylister-ubuntu-2404-check-template` | Ubuntu 24.04 LTS compatibility smoke |
 
-The template names and the shared host lock retain their former physical
-identifiers so this checkout keeps addressing the already verified protected
-resources and still contends with older worktrees. New disposable clones,
-commands, artifacts, environment variables, and documentation use
-`proxylister`.
+Template names, disposable clones, the shared host lock, artifacts, environment
+variables, and documentation all use the `proxylister` project name.
 
 Never boot, build in, modify, or delete either base template during an ordinary
 build. Run the development workflow through disposable linked clones:
@@ -170,9 +167,8 @@ PROXYLISTER_PVE_KNOWN_HOSTS=/path/to/known_hosts \
 ```
 
 The default host key is `~/.ssh/id_rsa`; the guest key is
-`~/.ssh/proxylister-build`. If only the former `~/.ssh/proxytools-build` key is
-present, the orchestrator uses it during migration. Ephemeral guest host keys
-stay in ignored build work.
+`~/.ssh/proxylister-build`. Ephemeral guest host keys stay in ignored build
+work.
 
 For a publishable candidate, use the explicit clean-snapshot mode:
 
