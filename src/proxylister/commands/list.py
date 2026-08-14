@@ -159,8 +159,10 @@ def main(argv=None):
             if interrupt_requested():
                 interrupted = True
             if not interrupted:
-                remaining_browser_checks = len(valid) - browser_submitted + bool(browser_future)
-                if remaining_browser_checks:
+                remaining_browser_checks = (
+                    len(valid) - browser_submitted + bool(browser_future) if browser_pool else 0
+                )
+                if browser_pool and remaining_browser_checks:
                     console.print(
                         f"Waiting for [bold]{remaining_browser_checks}[/bold] browser checks…"
                     )

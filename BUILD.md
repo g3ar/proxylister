@@ -111,7 +111,11 @@ Run the bounded network-dependent smoke separately:
 python3 release/smoke.py live release/bin/linux/proxylister
 ```
 
-Its list and monitor logs remain in
+The live list check fetches the real candidate set, starts checking it, waits
+until at least two valid proxies have been found, requests the normal bounded
+`Ctrl+C` shutdown, and requires stdout to match `working_proxies.txt` exactly.
+The minimum can be overridden with `--minimum-proxies` when diagnosing a live
+environment. Its list and monitor logs remain in
 `release/.work/local-linux/logs/live-list.log` and `live-monitor.log`, including
 after failure. Interactive browser and TUI acceptance remain manual.
 

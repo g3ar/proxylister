@@ -57,7 +57,10 @@ def fetch_all_proxies(verbose: bool = False) -> list[tuple[str, str]]:
     deduped = list(dict.fromkeys(entries))
     if verbose:
         for protocol in PROTOCOLS:
-            print(f"  {protocol}: {len(by_protocol[protocol])} proxies")
+            print(f"  {protocol}: {len(by_protocol[protocol])} proxies", file=sys.stderr)
         if len(entries) != len(deduped):
-            print(f"  Filtered {len(entries) - len(deduped)} duplicate protocol/address entries")
+            print(
+                f"  Filtered {len(entries) - len(deduped)} duplicate protocol/address entries",
+                file=sys.stderr,
+            )
     return deduped

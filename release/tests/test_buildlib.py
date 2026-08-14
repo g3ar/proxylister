@@ -20,6 +20,7 @@ from buildlib.core import BuildError, promote_directory, verify_checksums, write
 from buildlib.pve import PVEManager, SSHConfig, configured_pve_destination
 from buildlib.provision import WINDOWS_MEDIA, WindowsProvisioner
 from buildlib.source import create_snapshot, verify_snapshot
+from smoke import _assert_matching_proxy_output
 
 
 class FakePVE:
@@ -104,6 +105,32 @@ class SSHConfigTests(unittest.TestCase):
             with self.subTest(value=value), patch("buildlib.pve.PVE_HOST", value):
                 with self.assertRaisesRegex(BuildError, "hostname or IP address"):
                     configured_pve_destination()
+
+
+class LiveSmokeTests(unittest.TestCase):
+    def test_saved_proxy_file_must_exactly_match_live_stdout(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            stdout = root / "stdout.log"
+            saved = root / "working_proxies.txt"
+            expected = "http://192.0.2.1:80\nsocks5://192.0.2.2:1080\n"
+            stdout.write_text(expected, encoding="utf-8")
+            saved.write_text(expected, encoding="utf-8")
+            _assert_matching_proxy_output(stdout, saved, 2)
+
+            saved.write_text("http://192.0.2.1:80\n", encoding="utf-8")
+            with self.assertRaisesRegex(BuildError, "does not match"):
+                _assert_matching_proxy_output(stdout, saved, 2)
+
+    def test_live_output_requires_multiple_valid_proxies(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            stdout = root / "stdout.log"
+            saved = root / "working_proxies.txt"
+            stdout.write_text("http://192.0.2.1:80\n", encoding="utf-8")
+            saved.write_text("http://192.0.2.1:80\n", encoding="utf-8")
+            with self.assertRaisesRegex(BuildError, "expected at least 2"):
+                _assert_matching_proxy_output(stdout, saved, 2)
 
 
 class PVESafetyTests(unittest.TestCase):

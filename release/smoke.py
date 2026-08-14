@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import select
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -168,7 +170,118 @@ def _linux_monitor_smoke(executable: Path, log: Path, timeout: int) -> None:
             os.close(master)
 
 
-def live_smoke(artifact: Path, *, list_timeout: int, monitor_timeout: int) -> None:
+def _assert_matching_proxy_output(stdout_log: Path, output_file: Path, minimum: int) -> None:
+    stdout_lines = stdout_log.read_text(encoding="utf-8").splitlines()
+    saved_lines = output_file.read_text(encoding="utf-8").splitlines()
+    if len(stdout_lines) < minimum:
+        raise BuildError(
+            f"live list found {len(stdout_lines)} valid proxies; expected at least {minimum}"
+        )
+    if stdout_lines != saved_lines:
+        raise BuildError("live list stdout does not match working_proxies.txt")
+
+
+def _live_list_smoke(
+    executable: Path,
+    runtime: Path,
+    stdout_log: Path,
+    stderr_log: Path,
+    timeout: int,
+    minimum: int,
+) -> None:
+    found_enough = threading.Event()
+    observed_valid = 0
+    environment = os.environ.copy()
+    environment["FORCE_COLOR"] = "1"
+    environment["TTY_COMPATIBLE"] = "1"
+    environment["TTY_INTERACTIVE"] = "1"
+    creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+
+    with stdout_log.open("wb") as stdout, stderr_log.open("wb") as stderr:
+        if os.name == "nt":
+            stderr_target = subprocess.PIPE
+            progress_fd = None
+            slave_fd = None
+        else:
+            import pty
+
+            progress_fd, slave_fd = pty.openpty()
+            stderr_target = slave_fd
+        process = subprocess.Popen(
+            [executable, "list"],
+            cwd=runtime,
+            env=environment,
+            stdout=stdout,
+            stderr=stderr_target,
+            creationflags=creationflags,
+        )
+        if slave_fd is not None:
+            os.close(slave_fd)
+
+        def capture_progress() -> None:
+            nonlocal observed_valid
+            reader_fd = process.stderr.fileno() if progress_fd is None else progress_fd
+            pending = ""
+            try:
+                while True:
+                    try:
+                        chunk = os.read(reader_fd, 4096)
+                    except OSError:
+                        break
+                    if not chunk:
+                        break
+                    stderr.write(chunk)
+                    stderr.flush()
+                    pending = (pending + chunk.decode("utf-8", errors="replace"))[-16384:]
+                    for match in re.finditer(r"(\d+) valid", pending):
+                        observed_valid = max(observed_valid, int(match.group(1)))
+                    if observed_valid >= minimum:
+                        found_enough.set()
+            finally:
+                if progress_fd is not None:
+                    os.close(progress_fd)
+
+        reader = threading.Thread(target=capture_progress, daemon=True)
+        reader.start()
+        deadline = time.monotonic() + timeout
+        try:
+            while process.poll() is None and not found_enough.wait(0.1):
+                if time.monotonic() >= deadline:
+                    raise BuildError(
+                        f"live list did not find {minimum} valid proxies within {timeout}s"
+                    )
+            if process.poll() is None:
+                if os.name == "nt":
+                    process.send_signal(signal.CTRL_BREAK_EVENT)
+                else:
+                    process.send_signal(signal.SIGINT)
+            remaining = max(1.0, deadline - time.monotonic())
+            try:
+                return_code = process.wait(timeout=remaining)
+            except subprocess.TimeoutExpired as exc:
+                raise BuildError("live list did not finish bounded shutdown") from exc
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                process.wait(timeout=10)
+            reader.join(timeout=10)
+        if return_code:
+            raise BuildError(
+                f"live list smoke failed ({return_code}):\n"
+                f"{tail(stdout_log, 120)}\n{tail(stderr_log, 120)}"
+            )
+
+    output_file = runtime / "working_proxies.txt"
+    if not output_file.is_file():
+        raise BuildError("live smoke did not create working_proxies.txt")
+    _assert_matching_proxy_output(stdout_log, output_file, minimum)
+
+
+def live_smoke(
+    artifact: Path, *, list_timeout: int, monitor_timeout: int, minimum_proxies: int
+) -> None:
+    if minimum_proxies < 1:
+        raise BuildError("live minimum proxy count must be positive")
     artifact = artifact.resolve()
     if not artifact.is_file():
         raise BuildError(f"artifact is missing: {artifact}")
@@ -187,25 +300,11 @@ def live_smoke(artifact: Path, *, list_timeout: int, monitor_timeout: int) -> No
         shutil.copy2(artifact, executable)
         if os.name != "nt":
             executable.chmod(0o755)
-        with stdout_log.open("w", encoding="utf-8") as stdout, stderr_log.open(
-            "w", encoding="utf-8"
-        ) as stderr:
-            result = run(
-                [executable, "list"],
-                stdout=stdout,
-                stderr=stderr,
-                timeout=list_timeout,
-                check=False,
-            )
-        if result.returncode:
-            raise BuildError(
-                f"live list smoke failed ({result.returncode}):\n"
-                f"{tail(stdout_log, 120)}\n{tail(stderr_log, 120)}"
-            )
+        _live_list_smoke(
+            executable, runtime, stdout_log, stderr_log, list_timeout, minimum_proxies
+        )
         if not (runtime / "geodb/geoip.mmdb").is_file():
             raise BuildError("live smoke did not create the GeoIP database")
-        if not (runtime / "working_proxies.txt").exists():
-            raise BuildError("live smoke did not create working_proxies.txt")
         if os.name != "nt":
             _linux_monitor_smoke(executable, logs / "live-monitor.log", monitor_timeout)
             if not (runtime / "proxydb/proxylister.db").is_file():
@@ -228,6 +327,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=int(os.environ.get("PROXYLISTER_LIVE_MONITOR_TIMEOUT", 60)),
     )
+    live.add_argument(
+        "--minimum-proxies",
+        type=int,
+        default=int(os.environ.get("PROXYLISTER_LIVE_MINIMUM_PROXIES", 2)),
+    )
     return parser.parse_args()
 
 
@@ -241,6 +345,7 @@ def main() -> int:
                 args.artifact,
                 list_timeout=args.list_timeout,
                 monitor_timeout=args.monitor_timeout,
+                minimum_proxies=args.minimum_proxies,
             )
     except BuildError as exc:
         print(f"smoke: {exc}", file=sys.stderr)

@@ -370,7 +370,9 @@ output directory and must preserve the other platform's artifacts.
 `python3 release/build.py build linux` always runs deterministic offline frozen
 smoke. `python3 release/smoke.py live release/bin/linux/proxylister` is a
 separate bounded network check and must not be folded into the ordinary
-contributor build gate.
+contributor build gate. Its list check must observe multiple real valid proxies,
+request graceful interruption, and verify that stdout exactly matches the
+atomically saved `working_proxies.txt`.
 
 Preserve `.work` after builds for diagnostics. The Python native builder removes
 the previous ignored `release/bin/linux/` at startup and promotes the complete

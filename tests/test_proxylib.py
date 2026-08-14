@@ -97,6 +97,18 @@ class ProxyLibraryTests(unittest.TestCase):
             self.assertEqual(proxyscrape.fetch_proxy_list("http"), ["1.2.3.4:80", "5.6.7.8:1080"])
         self.assertTrue(response.closed)
 
+    def test_verbose_source_summary_does_not_pollute_stdout(self):
+        lists = {"http": ["1.2.3.4:80"], "socks4": [], "socks5": []}
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with patch.object(
+            proxyscrape, "fetch_proxy_list", side_effect=lambda protocol: lists[protocol]
+        ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            proxyscrape.fetch_all_proxies(verbose=True)
+
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertIn("http: 1 proxies", stderr.getvalue())
+
     def test_all_protocols_for_same_address_are_preserved(self):
         lists = {"http": ["1.2.3.4:80"], "socks4": ["1.2.3.4:80"], "socks5": []}
         with patch.object(proxyscrape, "fetch_proxy_list", side_effect=lambda protocol: lists[protocol]):
@@ -129,6 +141,21 @@ class ProxyLibraryTests(unittest.TestCase):
             self.assertEqual(list_command.main([]), 0)
 
         writer.assert_called_once_with([])
+
+    def test_plain_list_does_not_report_browser_work(self):
+        settings = Mock(url=None, max_latency=500, workers=1, timeout=1, samples=1)
+        result = ProxyResult("http", "192.0.2.1:80", True, 50)
+        stderr = io.StringIO()
+        with patch.object(list_command, "load_config", return_value=settings), patch.object(
+            list_command, "fetch_all_proxies", return_value=[("http", result.proxy)]
+        ), patch.object(
+            list_command, "check_candidate", return_value=result
+        ), patch.object(
+            list_command, "write_proxy_file", return_value=(Path("working_proxies.txt"), 1)
+        ), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            self.assertEqual(list_command.main([]), 0)
+
+        self.assertNotIn("browser checks", stderr.getvalue())
 
     def test_browser_validation_submits_only_one_check_at_a_time(self):
         first_browser_started = threading.Event()
