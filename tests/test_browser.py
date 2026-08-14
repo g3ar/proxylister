@@ -20,9 +20,10 @@ class BrowserSessionTests(unittest.TestCase):
                 find_browser("auto")
 
     def test_chrome_uses_incognito_temporary_profile_and_proxy(self):
-        command = chrome_command("chrome", Path("/tmp/profile"), "socks5", "1.2.3.4:1080", "about:blank")
+        profile = Path("/tmp/profile")
+        command = chrome_command("chrome", profile, "socks5", "1.2.3.4:1080", "about:blank")
         self.assertIn("--incognito", command)
-        self.assertIn("--user-data-dir=/tmp/profile", command)
+        self.assertIn(f"--user-data-dir={profile}", command)
         self.assertIn("--proxy-server=socks5://1.2.3.4:1080", command)
 
     def test_firefox_writes_isolated_http_proxy_profile(self):

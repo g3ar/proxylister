@@ -7,13 +7,14 @@ WINDOWS_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 # shellcheck source=../provision-host.sh
 source "$WINDOWS_DIR/provision-host.sh"
 
-declare -A CONFIGS STATUS NAMES TEMPLATES PROTECTIONS MACHINES
+declare -A CONFIGS STATUS NAMES DESCRIPTIONS TEMPLATES PROTECTIONS MACHINES
 COMMANDS=
 
 config_value() {
     local vmid=$1 key=$2
     case "$key" in
         name) printf '%s\n' "${NAMES[$vmid]-}" ;;
+        description) printf '%s\n' "${DESCRIPTIONS[$vmid]-}" ;;
         template) printf '%s\n' "${TEMPLATES[$vmid]-}" ;;
         protection) printf '%s\n' "${PROTECTIONS[$vmid]-}" ;;
         machine) printf '%s\n' "${MACHINES[$vmid]-}" ;;
@@ -54,6 +55,7 @@ guest_powershell() {
 reset_vm() {
     local vmid=$1 name=$2 template=${3:-} protection=${4:-0}
     NAMES[$vmid]=$name
+    DESCRIPTIONS[$vmid]=$WINDOWS_DESCRIPTION
     TEMPLATES[$vmid]=$template
     PROTECTIONS[$vmid]=$protection
     MACHINES[$vmid]=q35
@@ -112,7 +114,7 @@ case "$(config_value 9002 machine)" in
     q35|pc-q35-*) exit 1 ;;
 esac
 
-xmllint --noout "$WINDOWS_DIR/autounattend.xml" "$WINDOWS_DIR/sysprep-unattend.xml"
+xmllint --noout "$WINDOWS_DIR/autounattend.xml"
 [[ $(grep -o '@@PASSWORD@@' "$WINDOWS_DIR/autounattend.xml" | wc -l) -eq 2 ]]
 COMPUTER_NAME=$(xmllint --xpath \
     'string(//*[local-name()="settings"][@pass="specialize"]/*[local-name()="component"]/*[local-name()="ComputerName"])' \
@@ -129,12 +131,17 @@ grep -Fq "$OPENSSH_INSTALLER" "$WINDOWS_DIR/bootstrap.ps1"
 grep -Fq "$OPENSSH_SHA256" <(tr '[:upper:]' '[:lower:]' <"$WINDOWS_DIR/bootstrap.ps1")
 grep -Fq 'ADDLOCAL=Server' "$WINDOWS_DIR/bootstrap.ps1"
 grep -Fq 'stage=openssh-install' "$WINDOWS_DIR/bootstrap.ps1"
+grep -Fq 'template_mode = "ready-state-v1"' "$WINDOWS_DIR/bootstrap.ps1"
+grep -Fq 'Stop-Computer -Force' "$WINDOWS_DIR/bootstrap.ps1"
+! grep -Eiq 'Sysprep\.exe|/generalize|/oobe' "$WINDOWS_DIR/bootstrap.ps1"
 ! grep -Fq 'Add-WindowsCapability' "$WINDOWS_DIR/bootstrap.ps1"
 grep -Fq 'boot_key<=8' "$WINDOWS_DIR/provision-host.sh"
 grep -Fq 'qm sendkey "$WINDOWS_VMID" ret' "$WINDOWS_DIR/provision-host.sh"
 grep -Fq 'qm set "$WINDOWS_VMID" --boot '\''order=ide0;sata0'\''' \
     "$WINDOWS_DIR/provision-host.sh"
 grep -Fq 'wait_for_ready_shutdown "$WINDOWS_VMID"' "$WINDOWS_DIR/provision-host.sh"
+! grep -Fq 'sysprep-unattend.xml' "$WINDOWS_DIR/provision-host.sh"
+! grep -Fq 'slmgr.vbs /ato' "$WINDOWS_DIR/bootstrap.ps1"
 ! grep -Riq 'chocolatey\|winget\|invoke-webrequest\|windows update' \
     "$WINDOWS_DIR/bootstrap.ps1" "$WINDOWS_DIR/autounattend.xml"
 

@@ -18,10 +18,12 @@ from proxytools.paths import (
 
 class RuntimePathTests(unittest.TestCase):
     def test_frozen_home_is_the_executable_directory(self):
-        with patch.dict(os.environ, {}, clear=True), patch("sys.frozen", True, create=True), patch(
-            "sys.executable", "/opt/proxytools/proxytools"
-        ):
-            self.assertEqual(tool_home(), Path("/opt/proxytools"))
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / "proxytools"
+            with patch.dict(os.environ, {}, clear=True), patch(
+                "sys.frozen", True, create=True
+            ), patch("sys.executable", str(executable)):
+                self.assertEqual(tool_home(), Path(directory).resolve())
 
     def test_frozen_default_config_is_created_once(self):
         with tempfile.TemporaryDirectory() as directory:

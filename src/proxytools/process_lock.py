@@ -1,17 +1,19 @@
 """Prevent concurrent working commands inside one project clone.
 
-The lock uses the kernel's advisory ``flock`` rather than the mere presence of
-a file. It is therefore released automatically after crashes. The retained
-file contains human-readable ownership details useful in an error message.
+The lock uses Portalocker's native advisory file lock rather than the mere
+presence of a file, so ownership is released automatically after crashes on
+both POSIX and Windows. The retained file contains human-readable ownership
+details useful in an error message.
 """
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 from pathlib import Path
 from datetime import datetime, timezone
+
+import portalocker
 
 from proxytools.paths import database_path, lock_path, tool_home
 
@@ -27,14 +29,20 @@ class ProcessLock:
         self._file = None
 
     def __enter__(self):
-        self._file = self.path.open("a+", encoding="utf-8")
         try:
-            fcntl.flock(self._file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            self._file.seek(0)
-            details = self._file.read().strip()
-            self._file.close()
-            self._file = None
+            self._file = self.path.open("a+", encoding="utf-8")
+            portalocker.lock(self._file, portalocker.LOCK_EX | portalocker.LOCK_NB)
+        except (OSError, portalocker.exceptions.LockException):
+            details = ""
+            if self._file is not None:
+                try:
+                    self._file.seek(0)
+                    details = self._file.read().strip()
+                except OSError:
+                    pass
+                finally:
+                    self._file.close()
+                    self._file = None
             suffix = f" ({details})" if details else ""
             raise AlreadyRunning(f"another proxytools process is already running in {tool_home()}{suffix}")
         metadata = {
@@ -51,6 +59,6 @@ class ProcessLock:
 
     def __exit__(self, exc_type, exc, traceback):
         if self._file is not None:
-            fcntl.flock(self._file, fcntl.LOCK_UN)
+            portalocker.unlock(self._file)
             self._file.close()
             self._file = None

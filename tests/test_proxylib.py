@@ -52,7 +52,8 @@ class ProxyLibraryTests(unittest.TestCase):
                 return 1
 
             def update(self, *_args, **_kwargs):
-                os.kill(os.getpid(), signal.SIGINT)
+                handler = signal.getsignal(signal.SIGINT)
+                handler(signal.SIGINT, None)
 
         settings = Mock(url=None, max_latency=500, workers=1, timeout=1, samples=1)
         result = ProxyResult("http", "192.0.2.1:80", True, 50)
@@ -225,6 +226,7 @@ class ProxyLibraryTests(unittest.TestCase):
                 self.assertIs(current, session_factory.return_value)
             session_factory.return_value.close.assert_called_once_with()
 
+    @unittest.skipUnless(Path("/proc/self/fd").is_dir(), "requires Linux /proc descriptor accounting")
     def test_repeated_proxy_checks_do_not_accumulate_descriptors(self):
         class DescriptorSession:
             def __init__(self):

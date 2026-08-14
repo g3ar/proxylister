@@ -392,9 +392,10 @@ surface, update command help, README examples, and parser-surface tests.
 directory. Legacy root-level database, lock, GeoIP, and version files are moved
 atomically into `proxydb/` or `geodb/` without overwriting an existing target.
 
-`ProcessLock` uses Linux `flock`, not lock-file existence. Kernel ownership is
-released after exit or a crash; retained JSON is only diagnostic metadata. The
-lock is per clone, so separate clones may run simultaneously.
+`ProcessLock` uses Portalocker's native advisory lock, not lock-file existence.
+OS ownership is released after exit or a crash on POSIX and Windows; retained
+JSON is only diagnostic metadata. The lock is per clone, so separate clones
+may run simultaneously.
 
 ### GeoIP
 

@@ -149,6 +149,7 @@ if (Get-Command Set-MpPreference -ErrorAction SilentlyContinue) {
 }
 
 $ready = [ordered]@{
+    template_mode = "ready-state-v1"
     windows_product = (Get-CimInstance Win32_OperatingSystem).Caption
     windows_version = (Get-CimInstance Win32_OperatingSystem).Version
     python = $pythonVersion
@@ -158,17 +159,13 @@ $ready = [ordered]@{
 $ready | ConvertTo-Json | Set-Content -LiteralPath "C:\proxytools-template-ready.json" -Encoding utf8
 Write-Output "stage=ready"
 
-$sysprepAnswerSource = Find-FileOnCdrom "sysprep-unattend.xml"
-$sysprepAnswer = "$env:WINDIR\System32\Sysprep\proxytools-unattend.xml"
-Copy-Item -LiteralPath $sysprepAnswerSource -Destination $sysprepAnswer -Force
-
-# Every disposable clone must generate its own SSH host identity.
-Stop-Service -Name sshd -Force
-Remove-Item -Path (Join-Path $sshDirectory "ssh_host_*") -Force -ErrorAction SilentlyContinue
+# The template is a single-purpose build appliance. Clones intentionally keep
+# its hostname, machine identity, and SSH host key; the PVE build lock permits
+# only one Windows build clone at a time. Keeping the prepared state removes
+# specialize and OOBE from every disposable clone boot.
 Remove-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" `
     -Name AutoAdminLogon, DefaultUserName, DefaultPassword -ErrorAction SilentlyContinue
 
-Write-Output "stage=sysprep"
+Write-Output "stage=shutdown"
 Stop-Transcript
-Start-Process -FilePath "$env:WINDIR\System32\Sysprep\Sysprep.exe" `
-    -ArgumentList "/generalize /oobe /mode:vm /shutdown /quiet /unattend:$sysprepAnswer"
+Stop-Computer -Force

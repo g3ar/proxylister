@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller definition for the native Linux one-file executable."""
+"""PyInstaller definition shared by the native Linux and Windows executables."""
 
 from pathlib import Path
 import os

@@ -464,10 +464,9 @@ requires approval, describe it only as technical access for the already
 authorized project operation and continue when access is granted.
 
 Remote Linux orchestration is implemented and proven under `release/pve/linux/`.
-Windows PVE work belongs only under `release/pve/windows/`: use the Linux
-provisioner as the lifecycle/safety reference, keep guest-specific mechanics
-narrow. The template stage is complete; Windows project packaging is the next
-unimplemented stage and must not be inferred from template acceptance alone.
+Windows template provisioning and native project packaging are implemented and
+proven under `release/pve/windows/`; keep guest-specific mechanics narrow and
+preserve the same lifecycle and safety contract as Linux.
 
 Provision the Windows template only from pinned official sources: Microsoft
 Windows 11 Enterprise Evaluation x64 media plus Microsoft's published SHA256,
@@ -486,21 +485,45 @@ clones, and refresh the template deliberately from newer verified Microsoft
 evaluation media when its age or expiry requires it.
 
 Keep Windows unattended setup minimal and move guest preparation into one
-audited PowerShell bootstrap before Sysprep. The Windows build guests are
-isolated, disposable appliances, so suppress security/UI mechanisms that only
-interrupt automated builds (including SmartScreen, execution-policy prompts,
-Defender real-time scanning of build paths, sleep, and automatic servicing).
+audited PowerShell bootstrap. The template is a fully prepared build appliance:
+write a versioned ready-state marker, shut it down, and clone that state without
+Sysprep. Activate Evaluation in each ready clone before its build; first-login
+template setup can race the Windows licensing service. Disposable clones inherit
+the hostname, SID, and SSH host key because the PVE lock permits only one
+Windows build clone at a time; do not add specialize/OOBE work to clone boot.
+The Windows build guests are isolated, disposable appliances, so suppress
+security/UI mechanisms that only interrupt automated builds (including
+SmartScreen, execution-policy prompts, Defender real-time scanning of build
+paths, sleep, and automatic servicing).
 This security-relaxation exception applies only to the Windows template and
 its disposable Windows clones; never carry it into Linux hosts, templates,
 guests, or build workflows. Keep SSH key-only access and the PVE firewall; do
 not bypass official-source checks, UEFI/TPM, exact cleanup guards, or template
 validation.
 
-Windows template VMID `9002` is the current stopped, protected base after a
-successful unattended install, ready-marker/Sysprep gate, linked-clone guest
-validation, and external SSH key-login check. The provisioning workflow is
-implemented and the template has been accepted. Do not boot, modify, unprotect,
-or delete `9002` during ordinary build work. Use disposable linked clones.
+Windows ready-state template VMID `9002` is the current stopped, protected base
+after unattended installation, ready-state and linked-clone validation, and a
+complete native build/offline-smoke/live-smoke pass. Do not boot, modify,
+unprotect, or delete it during ordinary build work. Use disposable linked
+clones.
+During agent-driven development or debugging of the Windows pipeline, reuse one
+disposable Windows VM across iterations. Refresh code, scripts, and build state
+inside that VM and rerun only the stage being debugged; delete the VM after the
+pipeline problem is fixed. Do not
+reinvoke the top-level orchestrator merely to test each small script change.
+This is an agent debugging practice, not a change to the finished pipeline's
+independent-run lifecycle or cleanup contract.
+Every fresh Windows build clone must complete the normal online activation of
+the official Enterprise Evaluation installation and pass an explicit licensed,
+positive-grace-period gate before the build begins. Evaluation media does not
+need a product key, but an unactivated clone is not a valid build guest and may
+be shut down by WLMS during a long build.
+`release/pve/windows/build.sh` transfers one checksummed source snapshot, runs
+native source tests, produces `proxytools.exe`, runs offline and bounded live
+frozen smoke, verifies returned checksums, promotes only
+`release/bin/windows/`, deletes only the successful exact clone, and retains a
+failed clone and diagnostics. Its `--release` mode requires a completely clean
+worktree and archives `HEAD`.
 
 The supported standalone scope is:
 
@@ -571,6 +594,11 @@ development procedures in `DEVELOPERS.md`, standalone build procedures in
 `BUILD.md`, or implementation-specific details beside the relevant code, and
 record the concise invariant here. Do not add temporary observations, one-off
 task status, credentials, host secrets, or speculative plans to `AGENTS.md`.
+
+During implementation-design discussion, keep interim replies brief and absorb
+incremental constraints without restating the entire plan after every message.
+Do not edit until the user asks to implement; once implementation is requested,
+proceed autonomously within the agreed scope.
 
 Lead handoff messages with the result. Report changed behavior, tests actually
 run, remaining risks, and whether a commit/push was performed. Do not claim a

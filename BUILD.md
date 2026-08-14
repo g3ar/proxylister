@@ -14,8 +14,8 @@ they do not need this document.
 | Debian 13 PVE native build | Implemented |
 | Ubuntu 24.04 LTS PVE compatibility smoke | Implemented |
 | Clean checksummed PVE release snapshot | Implemented with `--release` |
-| Windows template | Implemented, validated, and accepted |
-| Windows native build and smoke | Not implemented; template is ready |
+| Windows ready-state template | Implemented and validated on VMID 9002 |
+| Windows 11 PVE native build, offline smoke, and live smoke | Implemented |
 | Release publication | Not implemented |
 
 Do not describe a planned stage as operational. Update this table when a stage
@@ -214,12 +214,56 @@ match the expected disposable guest. Both the Linux build orchestrator and
 template provisioner enforce this detach-and-recheck gate immediately before
 their destructive cleanup.
 
-## Windows build stage
+## PVE Windows build
 
-Windows work is deliberately staged. The repeatable template workflow under
-`release/pve/windows/` is implemented and has produced protected template VMID
-`9002`, which has been validated and accepted. Native Windows packaging and
-project smoke testing remain a separate, unimplemented stage.
+The repeatable template workflow under `release/pve/windows/` has produced the
+stopped, protected template VMID `9002`. Run the development build
+from anywhere in the checkout with:
+
+```bash
+./release/pve/windows/build.sh
+```
+
+The orchestrator validates the immutable template, reconciles only exact stale
+unprotected clones named `proxytools-windows-build-VMID`, and creates a fresh
+linked clone. It verifies the template marker, QEMU Guest Agent, SSH, and
+Python, then performs the normal online activation required by Enterprise
+Evaluation and rejects a guest that is not licensed or has no remaining grace
+period. No product key is required.
+
+The current worktree is transferred as one checksummed archive. Inside Windows,
+the pipeline creates a clean build environment, enforces
+`release/pve/windows/constraints.txt`, runs the native source tests, builds the
+committed PyInstaller definition, and runs deterministic offline frozen smoke.
+It then runs a bounded network-dependent live smoke against that same frozen
+executable. Only after every gate passes are the artifact, documentation,
+manifest, checksums, and logs returned and `release/bin/windows/` promoted.
+
+The successful clone is shut down and deleted. A failed active clone and its
+diagnostics are retained for investigation. Logs remain under
+`release/.work/pve-windows/logs/`; the finished distribution is under
+`release/bin/windows/`.
+
+For a publishable candidate, use the clean-snapshot mode:
+
+```bash
+./release/pve/windows/build.sh --release
+```
+
+It rejects tracked or untracked worktree changes and builds a checksummed
+`git archive` from `HEAD`. Use the same clean commit for the corresponding
+Linux `--release` run. Both orchestrators share the PVE-side build-lab lock.
+
+Run Windows orchestration checks explicitly when changing its lifecycle,
+transfer, build, or cleanup behavior:
+
+```bash
+./release/pve/windows/tests/test_build.sh
+./release/pve/windows/tests/test_provision_host.sh
+```
+
+These are infrastructure checks and are intentionally separate from the root
+Python source tests.
 
 The target build environment is current Windows 11 Enterprise Evaluation;
 LTSC 2024 evaluation media has an expired fixed build and must not be used.
@@ -228,10 +272,10 @@ x86_64 executable is expected to work on Windows 10, but compatibility must not
 be described as validated until the frozen artifact passes a native Windows 10
 smoke run.
 
-The Windows stage must reuse the Linux workflow's safety contract: protected
+The Windows stage reuses the Linux workflow's safety contract: protected
 immutable template, disposable clones, retained verified source media, bounded
 waits, exact cleanup guards, complete returned logs, and the same clean source
-snapshot used for Linux. Its implementation and infrastructure checks belong
+commit used for Linux. Its implementation and infrastructure checks belong
 only under `release/pve/windows/`.
 
 Sync the provisioning sources and dedicated public key to the build host, then
@@ -247,7 +291,7 @@ ssh root@PVE_HOST \
 
 The provisioner verifies or downloads pinned media, creates only the exact
 unprotected candidate VMID `9002`, completes unattended Setup and bootstrap,
-observes the ready marker before accepting Sysprep shutdown, validates a fresh
+observes the ready marker before accepting a clean shutdown, validates a fresh
 linked clone, deletes that successful clone, and only then protects the base
 template. A failure retains the exact active candidate for diagnosis.
 
@@ -280,7 +324,14 @@ source media on the PVE host. Generated unattended-answer media is temporary.
 
 Keep `Autounattend.xml` limited to deterministic Windows Setup, a local build
 administrator, and one bootstrap invocation. A single audited PowerShell
-bootstrap installs the guest/build prerequisites and runs Sysprep. Because the
+bootstrap installs the guest/build prerequisites, records the ready-state
+contract, and shuts down. Each clone performs the normal online Evaluation
+activation gate after boot; keeping it out of first-login setup avoids a
+transient Windows licensing-service race.
+Do not run Sysprep: the template is a prepared build appliance, and its linked
+clones intentionally inherit the hostname, SID, and SSH host key. The PVE lock
+permits only one Windows build clone at a time, so per-clone identity provides
+no benefit and would add specialize/OOBE to every build startup. Because the
 resulting Windows guests are isolated and disposable, the Windows template may
 suppress SmartScreen, PowerShell execution-policy prompts, Defender real-time
 build-path scanning, sleep, and automatic servicing that can interrupt a

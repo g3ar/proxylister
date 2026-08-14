@@ -11,6 +11,7 @@ set -euo pipefail
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 WINDOWS_VMID=9002
 WINDOWS_NAME=proxytools-windows-template
+WINDOWS_DESCRIPTION='Windows 11 Enterprise Evaluation 25H2 immutable Proxy Tools ready-state-v1 builder template; official pinned media; no cumulative update pass'
 WINDOWS_MEMORY=4096
 WINDOWS_DISK_GB=48
 IMAGE_DIR=/var/lib/vz/template/iso
@@ -170,6 +171,8 @@ validate_template() {
         || fail "Windows template must be stopped"
     [[ "$(config_value "$WINDOWS_VMID" name)" == "$WINDOWS_NAME" ]] \
         || fail "Windows template has an unexpected name"
+    [[ "$(config_value "$WINDOWS_VMID" description)" == "$WINDOWS_DESCRIPTION" ]] \
+        || fail "Windows template does not use the ready-state-v1 contract"
     [[ "$(config_value "$WINDOWS_VMID" template)" == 1 ]] \
         || fail "VMID $WINDOWS_VMID is not a template"
     if [[ "$require_protection" == 1 ]]; then
@@ -255,7 +258,7 @@ validate_linked_clone() {
     qm start "$vmid"
     wait_for_agent "$vmid"
     guest_powershell "$vmid" \
-        '$ErrorActionPreference="Stop"; if (-not (Test-Path C:\proxytools-template-ready.json)) { throw "ready marker missing" }; if ((Get-Service QEMU-GA).Status -ne "Running") { throw "QGA stopped" }; if ((Get-Service sshd).Status -ne "Running") { throw "sshd stopped" }; if (-not (Test-NetConnection 127.0.0.1 -Port 22 -InformationLevel Quiet)) { throw "sshd not listening" }; if (-not (Test-Path C:\ProgramData\ssh\ssh_host_ed25519_key)) { throw "SSH host key missing" }; $v=& C:\Python313\python.exe --version 2>&1; if ($v -notmatch "^Python 3\.13\.") { throw "bad Python: $v" }; $os=Get-CimInstance Win32_OperatingSystem; if ($os.Caption -notmatch "Windows 11 Enterprise Evaluation") { throw "bad OS: $($os.Caption)" }'
+        '$ErrorActionPreference="Stop"; if (-not (Test-Path C:\proxytools-template-ready.json)) { throw "ready marker missing" }; $ready=Get-Content C:\proxytools-template-ready.json -Raw | ConvertFrom-Json; if ($ready.template_mode -ne "ready-state-v1") { throw "unexpected template mode" }; if ((Get-Service QEMU-GA).Status -ne "Running") { throw "QGA stopped" }; if ((Get-Service sshd).Status -ne "Running") { throw "sshd stopped" }; if (-not (Test-NetConnection 127.0.0.1 -Port 22 -InformationLevel Quiet)) { throw "sshd not listening" }; if (-not (Test-Path C:\ProgramData\ssh\ssh_host_ed25519_key)) { throw "SSH host key missing" }; $v=& C:\Python313\python.exe --version 2>&1; if ($v -notmatch "^Python 3\.13\.") { throw "bad Python: $v" }; $os=Get-CimInstance Win32_OperatingSystem; if ($os.Caption -notmatch "Windows 11 Enterprise Evaluation") { throw "bad OS: $($os.Caption)" }'
     qm shutdown "$vmid" --timeout 180
     wait_for_stopped "$vmid" 60
     purge_exact_candidate "$vmid" "$name"
@@ -266,7 +269,7 @@ validate_linked_clone() {
 build_answer_iso() {
     local password=$1 source target="$IMAGE_DIR/$ANSWER_ISO"
     ANSWER_DIR=$(mktemp -d /tmp/proxytools-windows-answer.XXXXXX)
-    for source in autounattend.xml sysprep-unattend.xml bootstrap.ps1; do
+    for source in autounattend.xml bootstrap.ps1; do
         [[ -f "$SCRIPT_DIR/$source" ]] || fail "required provisioning source is missing: $source"
         cp -- "$SCRIPT_DIR/$source" "$ANSWER_DIR/$source"
     done
@@ -307,16 +310,17 @@ create_candidate() {
     done
     printf 'Started unattended Windows installation in VMID %s.\n' "$WINDOWS_VMID"
     # A stopped VM is not proof of a successful installation. Observe the
-    # bootstrap marker through QGA before accepting the later Sysprep shutdown.
+    # bootstrap marker through QGA before accepting its final clean shutdown.
     wait_for_ready_shutdown "$WINDOWS_VMID" 720
     detach_cached_source_media "$WINDOWS_VMID"
     qm set "$WINDOWS_VMID" --boot 'order=sata0'
     rm -f -- "$IMAGE_DIR/$ANSWER_ISO"
     qm template "$WINDOWS_VMID"
+    qm set "$WINDOWS_VMID" --description "$WINDOWS_DESCRIPTION"
     validate_template 0
     validate_linked_clone
     qm set "$WINDOWS_VMID" \
-        --description 'Windows 11 Enterprise Evaluation 25H2 immutable Proxy Tools builder template; official pinned media; no cumulative update pass' \
+        --description "$WINDOWS_DESCRIPTION" \
         --protection 1
     validate_template 1
     ACTIVE_VMID=
@@ -382,14 +386,15 @@ main() {
                 ACTIVE_VMID=
                 return
             fi
-            # A ready/Sysprep-complete candidate can be resumed after a host-
+            # A ready-state candidate can be resumed after a host-
             # side validation failure. It remains unprotected until a fresh
             # linked clone passes the complete guest contract.
             ACTIVE_VMID=$WINDOWS_VMID
+            qm set "$WINDOWS_VMID" --description "$WINDOWS_DESCRIPTION"
             validate_template 0
             validate_linked_clone
             qm set "$WINDOWS_VMID" \
-                --description 'Windows 11 Enterprise Evaluation 25H2 immutable Proxy Tools builder template; official pinned media; no cumulative update pass' \
+                --description "$WINDOWS_DESCRIPTION" \
                 --protection 1
             validate_template 1
             ACTIVE_VMID=
