@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from proxytools import cleanup
-from proxytools.process_lock import ProcessLock
+from proxylister import cleanup
+from proxylister.process_lock import ProcessLock
 
 
 class CleanupTests(unittest.TestCase):
@@ -15,14 +15,16 @@ class CleanupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
             generated_files = (
-                "proxytools.db", "proxytools.db-wal", "proxytools-geoip.mmdb",
-                "proxytools-geoip.version", "working_proxies.txt", ".coverage",
+                "proxylister.db", "proxylister.db-wal", "proxylister-geoip.mmdb",
+                "proxylister-geoip.version", "proxytools.db", "proxytools.lock",
+                "proxytools-geoip.mmdb", "working_proxies.txt", ".coverage",
             )
             for name in generated_files:
                 (home / name).write_text("generated")
             for name in (
-                "proxydb/proxytools.db", "proxydb/proxytools.db-wal",
-                "proxydb/proxytools.db-shm", "geodb/geoip.mmdb", "geodb/version",
+                "proxydb/proxylister.db", "proxydb/proxylister.db-wal",
+                "proxydb/proxylister.db-shm", "proxydb/proxytools.db",
+                "proxydb/proxytools.lock", "geodb/geoip.mmdb", "geodb/version",
             ):
                 path = home / name
                 path.parent.mkdir(exist_ok=True)
@@ -33,6 +35,7 @@ class CleanupTests(unittest.TestCase):
                 (path / "artifact").write_text("generated")
             (home / ".env").write_text("SECRET=preserved")
             (home / "results.txt").write_text("preserved")
+            (home / ".proxylister-geoip-interrupted").write_text("generated")
             (home / ".proxytools-geoip-interrupted").write_text("generated")
 
             cleanup.clear_runtime(home)
@@ -41,6 +44,7 @@ class CleanupTests(unittest.TestCase):
                 self.assertFalse((home / name).exists())
             self.assertFalse((home / ".venv").exists())
             self.assertFalse((home / "src/pkg/__pycache__").exists())
+            self.assertFalse((home / ".proxylister-geoip-interrupted").exists())
             self.assertFalse((home / ".proxytools-geoip-interrupted").exists())
             self.assertFalse((home / "proxydb").exists())
             self.assertFalse((home / "geodb").exists())
@@ -49,9 +53,9 @@ class CleanupTests(unittest.TestCase):
 
     def test_clear_refuses_while_clone_is_locked(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(
-            os.environ, {"PROXYTOOLS_HOME": directory}
+            os.environ, {"PROXYLISTER_HOME": directory}
         ):
-            database = Path(directory) / "proxydb" / "proxytools.db"
+            database = Path(directory) / "proxydb" / "proxylister.db"
             database.parent.mkdir()
             database.write_text("keep")
             output = io.StringIO()

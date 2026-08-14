@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 import requests
 
-from proxytools import geoip
+from proxylister import geoip
 
 
 class FakeDownload:
@@ -27,8 +27,8 @@ class FakeDownload:
 class GeoIPTests(unittest.TestCase):
     def test_current_database_is_downloaded_and_versioned_atomically(self):
         with tempfile.TemporaryDirectory() as directory:
-            database = Path(directory) / "proxytools-geoip.mmdb"
-            version = Path(directory) / "proxytools-geoip.version"
+            database = Path(directory) / "proxylister-geoip.mmdb"
+            version = Path(directory) / "proxylister-geoip.version"
             response = FakeDownload(gzip.compress(b"valid-mmdb"))
             with patch.object(geoip, "geoip_database_path", return_value=database), patch.object(
                 geoip, "geoip_version_path", return_value=version
@@ -44,8 +44,8 @@ class GeoIPTests(unittest.TestCase):
 
     def test_failed_update_keeps_existing_database(self):
         with tempfile.TemporaryDirectory() as directory:
-            database = Path(directory) / "proxytools-geoip.mmdb"
-            version = Path(directory) / "proxytools-geoip.version"
+            database = Path(directory) / "proxylister-geoip.mmdb"
+            version = Path(directory) / "proxylister-geoip.version"
             database.write_bytes(b"old-mmdb")
             version.write_text("2026-07\n")
             with patch.object(geoip, "geoip_database_path", return_value=database), patch.object(

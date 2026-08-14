@@ -1,4 +1,4 @@
-# Proxy Tools developer guide
+# ProxyLister developer guide
 
 This guide is the shortest path from a fresh clone to a safe, tested change.
 User installation, commands, keyboard controls, configuration examples, and
@@ -6,11 +6,11 @@ troubleshooting belong in [README.md](README.md). This file explains how the
 code fits together, where to add behavior, and which invariants must survive a
 change.
 
-Proxy Tools targets Python 3.10 or newer, uses a `src/` package layout, and has
+ProxyLister targets Python 3.10 or newer, uses a `src/` package layout, and has
 one supported entrypoint:
 
 ```bash
-./proxytools [list|monitor] [options]
+./proxylister [list|monitor] [options]
 ```
 
 ## First 10 minutes
@@ -19,14 +19,14 @@ From the repository root:
 
 ```bash
 git status --short --branch
-./proxytools --help
-./proxytools list --help
-./proxytools monitor --help
+./proxylister --help
+./proxylister list --help
+./proxylister monitor --help
 ./.venv/bin/python -m unittest discover -v
 ```
 
 The first real command creates `.venv` and installs the project. If `.venv`
-does not exist yet, run `./proxytools --version` or another normal command
+does not exist yet, run `./proxylister --version` or another normal command
 before invoking its Python directly.
 
 Before editing:
@@ -58,9 +58,9 @@ executables, locally or through PVE, are centralized in [BUILD.md](BUILD.md).
 Both commands share startup, discovery, and lightweight proxy checking:
 
 ```text
-./proxytools
+./proxylister
     │
-    ├─ launcher: create/refresh .venv
+    ├─ Python launcher: create/refresh the platform-specific .venv
     └─ cli.py: lock clone, prepare GeoIP, dispatch command
          │
          ├─ list.py
@@ -81,29 +81,29 @@ the dashboard renders them and sends user actions to existing services.
 
 | Goal | Start here | Usually update |
 |------|------------|----------------|
-| Change root dispatch or shared startup | `src/proxytools/cli.py` | `tests/test_cli.py` |
-| Change `list` behavior or options | `src/proxytools/commands/list.py` | CLI and proxy-library tests |
-| Change monitor construction or options | `src/proxytools/commands/monitor.py` | CLI tests |
-| Change candidate discovery | `src/proxytools/sources/proxyscrape.py` | `tests/test_proxylib.py` |
-| Change HTTP proxy validation | `src/proxytools/checking/proxy.py` | proxy and monitoring tests |
-| Change Selenium validation | `src/proxytools/checking/browser.py` | browser tests |
-| Change stability rules | `src/proxytools/stability/` | `tests/test_cli_helpers.py` |
-| Change monitor scheduling or snapshots | `src/proxytools/monitoring.py` | `tests/test_monitoring.py` |
-| Change the TUI table or actions | `src/proxytools/output/dashboard.py` | `tests/test_dashboard.py` |
-| Add a TUI modal or reusable widget | `src/proxytools/output/dashboard_widgets.py` | `tests/test_dashboard.py` |
-| Change saved monitor state | `src/proxytools/storage/sqlite.py` | `tests/test_persistence.py` |
+| Change root dispatch or shared startup | `src/proxylister/cli.py` | `tests/test_cli.py` |
+| Change `list` behavior or options | `src/proxylister/commands/list.py` | CLI and proxy-library tests |
+| Change monitor construction or options | `src/proxylister/commands/monitor.py` | CLI tests |
+| Change candidate discovery | `src/proxylister/sources/proxyscrape.py` | `tests/test_proxylib.py` |
+| Change HTTP proxy validation | `src/proxylister/checking/proxy.py` | proxy and monitoring tests |
+| Change Selenium validation | `src/proxylister/checking/browser.py` | browser tests |
+| Change stability rules | `src/proxylister/stability/` | `tests/test_cli_helpers.py` |
+| Change monitor scheduling or snapshots | `src/proxylister/monitoring.py` | `tests/test_monitoring.py` |
+| Change the TUI table or actions | `src/proxylister/output/dashboard.py` | `tests/test_dashboard.py` |
+| Add a TUI modal or reusable widget | `src/proxylister/output/dashboard_widgets.py` | `tests/test_dashboard.py` |
+| Change saved monitor state | `src/proxylister/storage/sqlite.py` | `tests/test_persistence.py` |
 | Change runtime paths or cleanup | `paths.py`, `cleanup.py` | path and cleanup tests |
-| Change configuration | `config.py`, `proxytools.conf` | config and CLI tests |
+| Change configuration | `config.py`, `proxylister.conf` | config and CLI tests |
 | Change dependencies or version metadata | `pyproject.toml` | launcher smoke test |
-| Change About text, credits, or build date | `src/proxytools/about.py` | CLI and dashboard tests |
+| Change About text, credits, or build date | `src/proxylister/about.py` | CLI and dashboard tests |
 
 ## Repository map
 
 ```text
-proxytools                  POSIX launcher and environment bootstrap
-proxytools.conf             strict runtime defaults
+proxylister                  cross-platform Python launcher and environment bootstrap
+proxylister.conf             strict runtime defaults
 pyproject.toml              only project/dependency manifest
-src/proxytools/
+src/proxylister/
   cli.py                    root dispatch and shared startup lifecycle
   cleanup.py                --clear implementation
   config.py                 config parsing and value validation
@@ -132,9 +132,11 @@ src/proxytools/
     dashboard.py            Textual rendering and app lifecycle
     dashboard_widgets.py    filter and analytics modals
 tests/                      offline Python tests for source application behavior
-release/pve/linux/          Linux PVE provisioning and build orchestration
-release/pve/linux/tests/    Linux PVE environment/infrastructure checks
-release/pve/windows/        Windows PVE workflow and infrastructure tests
+release/build.py            cross-platform build and PVE entrypoint
+release/buildlib/           shared native-build, transport, lifecycle, and provisioning code
+release/smoke.py            cross-platform frozen offline/live smoke
+release/tests/              offline build guards and explicit PVE audit checks
+release/pve/windows/        Windows unattended Setup bootstrap assets
 ```
 
 Generated state is per clone and ignored by Git:
@@ -326,7 +328,7 @@ the intended tolerance, grace period, and recovery.
 ## Persistence and restoration
 
 `StateRepository` stores useful `STABLE` and `PROBATION` restart state in
-`proxydb/proxytools.db`. WAL mode produces normal `-wal` and `-shm` companion
+`proxydb/proxylister.db`. WAL mode produces normal `-wal` and `-shm` companion
 files. `DEGRADED` and never-working candidates are removed rather than retained
 as an unlimited history of dead proxies.
 
@@ -356,11 +358,14 @@ user's database merely to make a schema change easier.
 
 ### Launcher and command dispatch
 
-The root `proxytools` script resolves the checkout directory, creates or
-refreshes `.venv`, installs the editable project from `pyproject.toml`, exports
-`PYTHONPATH` and `PROXYTOOLS_HOME`, and delegates to `python -m proxytools`.
+The root `proxylister` script is a standard-library-only Python launcher. It
+resolves the checkout directory, creates or refreshes the platform-specific
+`.venv`, installs the editable project from `pyproject.toml`, exports
+`PYTHONPATH` and `PROXYLISTER_HOME`, and delegates to `python -m proxylister`.
+Run it as `./proxylister` on POSIX or `py -3 proxylister` on Windows; both paths
+use the same file and public command surface.
 `pyproject.toml` is the only dependency and project manifest; the package
-version is read dynamically from `proxytools.__version__`.
+version is read dynamically from `proxylister.__version__`.
 
 `about.py` is the single source for the name, one-sentence description,
 contributors, build date, and formatted About text used by both `--about` and
@@ -377,7 +382,7 @@ version do not acquire the lock.
 
 ### Configuration
 
-`proxytools.conf` is a complete flat `KEY=value` document parsed as data with
+`proxylister.conf` is a complete flat `KEY=value` document parsed as data with
 `shlex`; it is never sourced as shell code. `RuntimeConfig` contains typed
 values. The parser rejects unknown or duplicate keys, missing values, malformed
 assignments, invalid ranges, and impossible cross-field combinations.
@@ -388,9 +393,10 @@ surface, update command help, README examples, and parser-surface tests.
 
 ### Runtime paths and locking
 
-`paths.py` resolves state from `PROXYTOOLS_HOME`, never from the caller's current
-directory. Legacy root-level database, lock, GeoIP, and version files are moved
-atomically into `proxydb/` or `geodb/` without overwriting an existing target.
+`paths.py` resolves state from `PROXYLISTER_HOME`, never from the caller's current
+directory. It accepts the former home variable for migration and atomically
+moves database, lock, GeoIP, version, and config files created under the former
+project name without overwriting an existing target.
 
 `ProcessLock` uses Portalocker's native advisory lock, not lock-file existence.
 OS ownership is released after exit or a crash on POSIX and Windows; retained
@@ -418,7 +424,7 @@ helper never reads or changes the user's normal browser profile.
 
 ### Cleanup
 
-`./proxytools --clear` removes only known generated artifacts and refuses to
+`./proxylister --clear` removes only known generated artifacts and refuses to
 run while another command owns the clone lock. Source, Git metadata, `.env`,
 and arbitrary user exports are preserved.
 
@@ -477,17 +483,17 @@ Mock ProxyScrape, DB-IP, identity services, target sites, browsers, clocks, and
 filesystem homes as appropriate.
 
 The root `tests/` tree is exclusively for Python tests of the source project.
-PVE environment, provisioning, cleanup-guard, and orchestration checks are not
-application tests; keep them under the corresponding
-`release/pve/PLATFORM/tests/` directory and invoke them explicitly.
+Build-lab provisioning, cleanup-guard, and orchestration checks are not
+application tests; keep them under `release/tests/` and invoke them explicitly
+as documented in `BUILD.md`.
 
 For a normal Python change, run from the repository root:
 
 ```bash
 ./.venv/bin/python -m unittest discover -v
-find src/proxytools -name '*.py' -print0 \
+find src/proxylister -name '*.py' -print0 \
   | xargs -0 ./.venv/bin/python -m py_compile
-sh -n proxytools
+./.venv/bin/python -m py_compile proxylister
 git diff --check
 git status --short --branch
 ```

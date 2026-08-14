@@ -2,10 +2,10 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from proxytools.models import ProxyResult
-from proxytools.monitoring import MonitorEngine
-from proxytools.stability import StabilityConfig, StabilityPolicy
-from proxytools.stability.history import ProxyHistory
+from proxylister.models import ProxyResult
+from proxylister.monitoring import MonitorEngine
+from proxylister.stability import StabilityConfig, StabilityPolicy
+from proxylister.stability.history import ProxyHistory
 
 
 class MonitorEngineTests(unittest.TestCase):
@@ -205,7 +205,7 @@ class MonitorEngineTests(unittest.TestCase):
             refresh_interval=1, retention_time=60, target_url="https://example.com",
             checker=lambda *args: ProxyResult("http", "1.2.3.4:80", True, 50, "France"),
         )
-        with patch("proxytools.monitoring.check_url", return_value=True) as target_check:
+        with patch("proxylister.monitoring.check_url", return_value=True) as target_check:
             result = engine._check_candidate("http", "1.2.3.4:80")
         self.assertTrue(result.reachable)
         target_check.assert_called_once_with(
@@ -218,7 +218,7 @@ class MonitorEngineTests(unittest.TestCase):
             refresh_interval=1, retention_time=60, target_url="https://example.com",
             checker=lambda *args: ProxyResult("http", "1.2.3.4:80", True, 50, "France"),
         )
-        with patch("proxytools.monitoring.check_url", return_value=False):
+        with patch("proxylister.monitoring.check_url", return_value=False):
             result = engine._check_candidate("http", "1.2.3.4:80")
         history = ProxyHistory("http", result.proxy, 10)
         history.record(result, 100, engine.policy)
@@ -234,7 +234,7 @@ class MonitorEngineTests(unittest.TestCase):
             refresh_interval=1, retention_time=60, target_url="https://example.com",
             checker=lambda *args: ProxyResult("http", "1.2.3.4:80", False),
         )
-        with patch("proxytools.monitoring.check_url") as target_check:
+        with patch("proxylister.monitoring.check_url") as target_check:
             result = engine._check_candidate("http", "1.2.3.4:80")
         self.assertFalse(result.reachable)
         target_check.assert_not_called()

@@ -11,13 +11,13 @@ from unittest.mock import Mock, patch
 
 import requests
 
-from proxytools import config
-from proxytools import http
-from proxytools.commands import list as list_command
-from proxytools.checking import proxy as checker
-from proxytools.models import ProxyResult
-from proxytools.output.results import write_proxy_file
-from proxytools.sources import proxyscrape
+from proxylister import config
+from proxylister import http
+from proxylister.commands import list as list_command
+from proxylister.checking import proxy as checker
+from proxylister.models import ProxyResult
+from proxylister.output.results import write_proxy_file
+from proxylister.sources import proxyscrape
 
 
 class FakeResponse:
@@ -72,7 +72,7 @@ class ProxyLibraryTests(unittest.TestCase):
 
     def test_proxy_file_atomically_replaces_stale_plain_results(self):
         with tempfile.TemporaryDirectory() as directory, patch(
-            "proxytools.output.results.working_proxies_path",
+            "proxylister.output.results.working_proxies_path",
             return_value=Path(directory) / "working_proxies.txt",
         ):
             path = Path(directory) / "working_proxies.txt"

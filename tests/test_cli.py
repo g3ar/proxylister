@@ -5,12 +5,12 @@ import tempfile
 import unittest
 from unittest import mock
 
-from proxytools import __version__
-from proxytools import about as about_module
-from proxytools.about import AUTHORS, BUILD_DATE, DESCRIPTION, format_about
-from proxytools import cli
-from proxytools.commands import list as list_command
-from proxytools.commands import monitor
+from proxylister import __version__
+from proxylister import about as about_module
+from proxylister.about import AUTHORS, BUILD_DATE, DESCRIPTION, format_about
+from proxylister import cli
+from proxylister.commands import list as list_command
+from proxylister.commands import monitor
 
 
 class TopLevelCliTests(unittest.TestCase):
@@ -40,14 +40,14 @@ class TopLevelCliTests(unittest.TestCase):
         with contextlib.redirect_stdout(output):
             self.assertEqual(cli.main(["--about"]), 0)
         about = output.getvalue()
-        self.assertIn(f"Proxy Tools {__version__}", about)
+        self.assertIn(f"ProxyLister {__version__}", about)
         self.assertIn(DESCRIPTION, about)
         self.assertIn(", ".join(AUTHORS), about)
         self.assertIn(f"Build date: {BUILD_DATE}", about)
 
     def test_frozen_about_reads_embedded_build_metadata(self):
         with tempfile.TemporaryDirectory() as directory:
-            Path(directory, "proxytools-build.txt").write_text(
+            Path(directory, "proxylister-build.txt").write_text(
                 "build_utc=2026-08-09T00:00:00Z\n"
                 f"source_commit={'a' * 40}\n",
                 encoding="utf-8",
@@ -59,8 +59,8 @@ class TopLevelCliTests(unittest.TestCase):
         self.assertIn(f"Source commit: {'a' * 40}", about)
 
     def test_subcommand_program_names(self):
-        self.assertEqual(list_command.build_parser().prog, "proxytools list")
-        self.assertEqual(monitor.build_parser().prog, "proxytools monitor")
+        self.assertEqual(list_command.build_parser().prog, "proxylister list")
+        self.assertEqual(monitor.build_parser().prog, "proxylister monitor")
 
     def test_monitor_uses_forgiving_stability_defaults(self):
         settings = monitor.load_config()

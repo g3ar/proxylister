@@ -1,14 +1,15 @@
-# Proxy Tools single-executable builds
+# ProxyLister single-executable builds
 
 This is the only build runbook. It covers local and PVE-assisted creation and
 testing of standalone executables. Normal users either clone the repository and
-run `./proxytools`, or download a prepared binary as described in `README.md`;
+run `./proxylister`, or download a prepared binary as described in `README.md`;
 they do not need this document.
 
 ## Current status
 
 | Stage | Status |
 |---|---|
+| Cross-platform Python build/PVE control plane | Implemented |
 | Local Linux x86_64 build and offline frozen smoke | Implemented |
 | Optional local Linux live smoke | Implemented |
 | Debian 13 PVE native build | Implemented |
@@ -44,8 +45,8 @@ release/bin/linux/
 release/bin/windows/
 ```
 
-The Linux executable is named `proxytools`; the Windows executable is named
-`proxytools.exe`. Do not add OS, architecture, or version suffixes to either
+The Linux executable is named `proxylister`; the Windows executable is named
+`proxylister.exe`. Do not add OS, architecture, or version suffixes to either
 directory or executable name. Each platform directory carries its own
 `README.md`, `LICENSE`, `MANIFEST.txt`, and `SHA256SUMS`; OS, architecture,
 version, source identity, and build-tool identity belong in the executable
@@ -57,12 +58,20 @@ state and must not be committed. `pyproject.toml` remains the only project and
 dependency manifest. Exact Linux build dependencies are locked in
 `release/linux/constraints.txt`.
 
+All build and build-lab orchestration starts through the cross-platform Python
+entrypoint `release/build.py`. Shared implementation lives under
+`release/buildlib/`; `release/smoke.py` owns native frozen smoke on both
+platforms. Bash is not part of the build implementation. `Autounattend.xml` and
+`release/pve/windows/bootstrap.ps1` remain narrow Windows Setup inputs because
+they execute before Python is available in a new Windows guest.
+The examples use `python3`; on Windows use the equivalent `py -3` command.
+
 ## Local Linux build
 
 From anywhere inside the checkout, run:
 
 ```bash
-./release/linux/build.sh
+python3 release/build.py build linux
 ```
 
 Use this when changing packaging, startup, bundled resources, runtime paths,
@@ -70,7 +79,7 @@ configuration bootstrap, PyInstaller-sensitive imports, or before handing off
 a release-related change. It accepts a dirty worktree so work in progress can
 be tested.
 
-The script removes its previous `release/.work/local-linux/` and
+The Python builder removes its previous `release/.work/local-linux/` and
 `release/bin/linux/`, creates a fresh release-only virtual environment,
 enforces the locked dependencies, runs source validation, builds the one-file
 executable, and runs deterministic offline frozen smoke. Only a fully
@@ -78,7 +87,7 @@ successful artifact set is promoted to `release/bin/linux/`.
 
 The result contains:
 
-- `proxytools`;
+- `proxylister`;
 - a generated copy of the root `README.md` for the distribution;
 - `LICENSE`;
 - `MANIFEST.txt`;
@@ -93,13 +102,13 @@ Rerun deterministic frozen smoke against the current artifact without a new
 build:
 
 ```bash
-./release/linux/smoke.sh release/bin/linux/proxytools
+python3 release/smoke.py offline release/bin/linux/proxylister
 ```
 
 Run the bounded network-dependent smoke separately:
 
 ```bash
-./release/linux/smoke-live.sh release/bin/linux/proxytools
+python3 release/smoke.py live release/bin/linux/proxylister
 ```
 
 Its list and monitor logs remain in
@@ -116,11 +125,17 @@ development. The build lab uses these stopped, protected, immutable templates:
 | `9000` | `proxytools-linux-template` | Debian 13 native build and test |
 | `9001` | `proxytools-ubuntu-2404-check-template` | Ubuntu 24.04 LTS compatibility smoke |
 
+The template names and the shared host lock retain their former physical
+identifiers so this checkout keeps addressing the already verified protected
+resources and still contends with older worktrees. New disposable clones,
+commands, artifacts, environment variables, and documentation use
+`proxylister`.
+
 Never boot, build in, modify, or delete either base template during an ordinary
 build. Run the development workflow through disposable linked clones:
 
 ```bash
-./release/pve/linux/build.sh
+python3 release/build.py build linux --pve
 ```
 
 The orchestrator transfers the current worktree, builds and tests it in a
@@ -131,27 +146,30 @@ to `release/bin/linux/` only after both operating-system gates pass.
 Successful exact clones are shut down and deleted. The active clone and
 available diagnostics are retained on failure. At the beginning of the next
 run, only exact unprotected non-template clones named
-`proxytools-debian-build-VMID` or `proxytools-ubuntu-validation-VMID` may be
+`proxylister-debian-build-VMID` or `proxylister-ubuntu-validation-VMID` may be
 reconciled automatically. Unrelated VMs and protected templates are never
 cleanup targets.
 
 Logs remain under `release/.work/pve-linux/logs/{debian,ubuntu}/`. Override
-connection defaults without editing the script when necessary:
+connection defaults without editing the code when necessary:
 
 ```bash
-PROXYTOOLS_PVE_HOST=root@PVE_HOST \
-PROXYTOOLS_PVE_ROOT_KEY=/path/to/pve-root-key \
-PROXYTOOLS_PVE_GUEST_KEY=/path/to/proxytools-build-key \
-  ./release/pve/linux/build.sh
+PROXYLISTER_PVE_HOST=root@PVE_HOST \
+PROXYLISTER_PVE_ROOT_KEY=/path/to/pve-root-key \
+PROXYLISTER_PVE_GUEST_KEY=/path/to/proxylister-build-key \
+PROXYLISTER_PVE_KNOWN_HOSTS=/path/to/known_hosts \
+  python3 release/build.py build linux --pve
 ```
 
 The default host key is `~/.ssh/id_rsa`; the guest key is
-`~/.ssh/proxytools-build`. Ephemeral guest host keys stay in ignored build work.
+`~/.ssh/proxylister-build`. If only the former `~/.ssh/proxytools-build` key is
+present, the orchestrator uses it during migration. Ephemeral guest host keys
+stay in ignored build work.
 
 For a publishable candidate, use the explicit clean-snapshot mode:
 
 ```bash
-./release/pve/linux/build.sh --release
+python3 release/build.py build linux --pve --release
 ```
 
 It refuses tracked or untracked worktree changes before cleanup, creates one
@@ -161,17 +179,14 @@ contender exits before touching local output or VMs.
 
 ### Provision or audit the Linux templates
 
-The clean-host bootstrap is `release/pve/linux/provision-host.sh`. PVE storage
-and `vmbr0` networking are site-specific prerequisites and must already be
-configured. Copy the script and only the public half of the dedicated guest key
-to the host:
+PVE storage and `vmbr0` networking are site-specific prerequisites and must
+already be configured. The same Python entrypoint bundles the provisioner,
+copies it and only the public half of the dedicated guest key to a temporary
+PVE-host directory, runs it there, and removes that temporary directory:
 
 ```bash
-scp release/pve/linux/provision-host.sh root@PVE_HOST:/root/
-scp ~/.ssh/proxytools-build.pub root@PVE_HOST:/root/
-ssh root@PVE_HOST \
-  /root/provision-host.sh \
-    --ssh-public-key /root/proxytools-build.pub
+python3 release/build.py provision linux \
+  --ssh-public-key ~/.ssh/proxylister-build.pub
 ```
 
 The bootstrap validates host prerequisites, verifies official cloud-image
@@ -182,21 +197,21 @@ VMID or a mismatched cached image automatically.
 Audit the existing host without downloading, creating, or changing anything:
 
 ```bash
-ssh root@PVE_HOST /root/provision-host.sh --check-only
+python3 release/build.py provision linux --check-only
 ```
 
 Run infrastructure checks explicitly; they are not part of the Python source
 test suite:
 
 ```bash
-./release/pve/linux/tests/test_build.sh
-./release/pve/linux/tests/test_provision_host.sh
+python3 -m unittest discover -s release/tests -v
+python3 release/tests/pve_audit.py linux
 ```
 
-The second command performs a read-only comparison against the configured PVE
-host. All Linux PVE code and checks stay under `release/pve/linux/`; Windows PVE
-code and checks stay under `release/pve/windows/`. The root `tests/` directory
-is only for Python tests of project source.
+The first command is the offline shared build/PVE guard suite. The second
+performs a read-only before/after comparison against the configured PVE host.
+Release infrastructure tests live under `release/tests/`; the root `tests/`
+directory remains only for source-application behavior.
 
 ### Cached installation media and safe cleanup
 
@@ -221,11 +236,11 @@ stopped, protected template VMID `9002`. Run the development build
 from anywhere in the checkout with:
 
 ```bash
-./release/pve/windows/build.sh
+python3 release/build.py build windows --pve
 ```
 
 The orchestrator validates the immutable template, reconciles only exact stale
-unprotected clones named `proxytools-windows-build-VMID`, and creates a fresh
+unprotected clones named `proxylister-windows-build-VMID`, and creates a fresh
 linked clone. It verifies the template marker, QEMU Guest Agent, SSH, and
 Python, then performs the normal online activation required by Enterprise
 Evaluation and rejects a guest that is not licensed or has no remaining grace
@@ -247,19 +262,23 @@ diagnostics are retained for investigation. Logs remain under
 For a publishable candidate, use the clean-snapshot mode:
 
 ```bash
-./release/pve/windows/build.sh --release
+python3 release/build.py build windows --pve --release
 ```
 
 It rejects tracked or untracked worktree changes and builds a checksummed
-`git archive` from `HEAD`. Use the same clean commit for the corresponding
-Linux `--release` run. Both orchestrators share the PVE-side build-lab lock.
+`git archive` from `HEAD`. To guarantee both platforms consume one physical
+snapshot under one PVE lock, use:
+
+```bash
+python3 release/build.py build all --pve --release
+```
 
 Run Windows orchestration checks explicitly when changing its lifecycle,
 transfer, build, or cleanup behavior:
 
 ```bash
-./release/pve/windows/tests/test_build.sh
-./release/pve/windows/tests/test_provision_host.sh
+python3 -m unittest discover -s release/tests -v
+python3 release/tests/pve_audit.py windows
 ```
 
 These are infrastructure checks and are intentionally separate from the root
@@ -272,21 +291,17 @@ x86_64 executable is expected to work on Windows 10, but compatibility must not
 be described as validated until the frozen artifact passes a native Windows 10
 smoke run.
 
-The Windows stage reuses the Linux workflow's safety contract: protected
+The Windows adapter reuses the shared Python lifecycle's safety contract:
 immutable template, disposable clones, retained verified source media, bounded
 waits, exact cleanup guards, complete returned logs, and the same clean source
-commit used for Linux. Its implementation and infrastructure checks belong
-only under `release/pve/windows/`.
+commit used for Linux. Windows-only unattended Setup assets remain under
+`release/pve/windows/`; the lifecycle itself has one shared implementation.
 
-Sync the provisioning sources and dedicated public key to the build host, then
-run the host-side provisioner:
+Run the shared provision command with the dedicated public key:
 
 ```bash
-rsync -a --delete release/pve/windows/ \
-  root@PVE_HOST:/root/proxytools-windows-template/
-scp ~/.ssh/proxytools-build.pub root@PVE_HOST:/root/proxytools-build.pub
-ssh root@PVE_HOST \
-  '/root/proxytools-windows-template/provision-host.sh --ssh-public-key /root/proxytools-build.pub'
+python3 release/build.py provision windows \
+  --ssh-public-key ~/.ssh/proxylister-build.pub
 ```
 
 The provisioner verifies or downloads pinned media, creates only the exact
@@ -298,9 +313,8 @@ template. A failure retains the exact active candidate for diagnosis.
 Audit the resulting template and cached media without changing the host:
 
 ```bash
-ssh root@PVE_HOST \
-  '/root/proxytools-windows-template/provision-host.sh --check-only'
-./release/pve/windows/tests/test_provision_host.sh
+python3 release/build.py provision windows --check-only
+python3 release/tests/pve_audit.py windows
 ```
 
 The template is built from pinned official sources: the current Windows 11

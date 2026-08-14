@@ -2,17 +2,17 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from proxytools.models import ProxyResult
-from proxytools.process_lock import AlreadyRunning, ProcessLock
-from proxytools.stability import StabilityConfig, StabilityPolicy
-from proxytools.storage import CheckObservation, StateRepository
-from proxytools.storage.sqlite import SCHEMA_VERSION
+from proxylister.models import ProxyResult
+from proxylister.process_lock import AlreadyRunning, ProcessLock
+from proxylister.stability import StabilityConfig, StabilityPolicy
+from proxylister.storage import CheckObservation, StateRepository
+from proxylister.storage.sqlite import SCHEMA_VERSION
 
 
 class PersistenceTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
-        self.path = Path(self.temporary.name) / "proxytools.db"
+        self.path = Path(self.temporary.name) / "proxylister.db"
         self.repository = StateRepository(self.path)
         self.policy = StabilityPolicy(
             StabilityConfig(history_size=10, min_checks=2, min_success_streak=2, min_alive_time=5)
@@ -215,7 +215,7 @@ class PersistenceTests(unittest.TestCase):
 class ProcessLockTests(unittest.TestCase):
     def test_second_process_lock_in_same_directory_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "proxytools.lock"
+            path = Path(directory) / "proxylister.lock"
             with ProcessLock("monitor", path):
                 with self.assertRaises(AlreadyRunning):
                     with ProcessLock("list", path):

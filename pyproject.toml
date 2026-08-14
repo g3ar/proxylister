@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "proxytools"
+name = "proxylister"
 dynamic = ["version"]
 description = "CLI tools for discovering and monitoring public proxies"
 readme = "README.md"
@@ -12,10 +12,10 @@ license = {text = "MIT"}
 dependencies = ["maxminddb>=2.6", "portalocker>=4.1", "requests[socks]", "selenium>=4.10", "rich>=14", "textual>=1.0"]
 
 [project.scripts]
-proxytools = "proxytools.cli:main"
+proxylister = "proxylister.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.dynamic]
-version = {attr = "proxytools.__version__"}
+version = {attr = "proxylister.__version__"}

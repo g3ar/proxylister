@@ -1,4 +1,4 @@
-# Proxy Tools — local agent handoff
+# ProxyLister — local agent handoff
 
 This file is the shared starting context for new Codex chats working on this
 repository. It is versioned with the project so the same operational context is
@@ -24,7 +24,7 @@ that path into project code.
 
 ## Project in one paragraph
 
-Proxy Tools discovers public HTTP, SOCKS4, and SOCKS5 proxies, validates them
+ProxyLister discovers public HTTP, SOCKS4, and SOCKS5 proxies, validates them
 through real HTTPS requests, measures latency, resolves the observed exit IP
 through a locally downloaded GeoIP database, and monitors useful candidates in
 a Textual terminal UI until they qualify as stable. Selenium is installed with
@@ -64,7 +64,7 @@ maintenance workflow, not merely by the number of lines changed.
 There is one root entrypoint:
 
 ```bash
-./proxytools [mode] [options]
+./proxylister [mode] [options]
 ```
 
 Modes:
@@ -85,10 +85,11 @@ Keep the CLI small. The intentional public options are:
 - `--browser-check` where applicable;
 - `--headless` where applicable.
 
-Technical defaults belong in the commented plain-text `proxytools.conf`, not
-in an expanding collection of CLI flags. The root launcher bootstraps a local
-`.venv`; `pyproject.toml` is the only dependency/project manifest. Do not add a
-second `requirements.txt`.
+Technical defaults belong in the commented plain-text `proxylister.conf`, not
+in an expanding collection of CLI flags. The root launcher is a
+standard-library-only, cross-platform Python script and bootstraps the
+platform-specific local `.venv`; `pyproject.toml` is the only
+dependency/project manifest. Do not add a second `requirements.txt`.
 
 Monitor controls currently include:
 
@@ -166,24 +167,24 @@ Standard Textual widgets are implementation tools, not visual or interaction
 requirements. In particular, do not fall back to the stock Textual footer,
 web-style hover effects, automatic selection, gratuitous notifications,
 input-delaying animation, or IDE-like multi-pane complexity. Do not imitate
-any reference pixel for pixel; keep Proxy Tools compact and task-specific.
+any reference pixel for pixel; keep ProxyLister compact and task-specific.
 
 ## Architecture
 
 The package uses a `src/` layout:
 
 ```text
-proxytools                         root POSIX launcher
-proxytools.conf                    runtime defaults
-src/proxytools/cli.py              root dispatch/lifecycle
-src/proxytools/commands/           list and monitor orchestration
-src/proxytools/checking/           lightweight and Selenium checks
-src/proxytools/stability/          history and state policy
-src/proxytools/storage/sqlite.py   persisted monitor state
-src/proxytools/output/             stdout/Rich/Textual presentation
-src/proxytools/monitoring.py       UI-independent monitoring engine
-src/proxytools/geoip.py            DB-IP download and local lookup
-src/proxytools/browser*.py         disposable interactive sessions
+proxylister                         root cross-platform Python launcher
+proxylister.conf                    runtime defaults
+src/proxylister/cli.py              root dispatch/lifecycle
+src/proxylister/commands/           list and monitor orchestration
+src/proxylister/checking/           lightweight and Selenium checks
+src/proxylister/stability/          history and state policy
+src/proxylister/storage/sqlite.py   persisted monitor state
+src/proxylister/output/             stdout/Rich/Textual presentation
+src/proxylister/monitoring.py       UI-independent monitoring engine
+src/proxylister/geoip.py            DB-IP download and local lookup
+src/proxylister/browser*.py         disposable interactive sessions
 tests/                             mocked, offline unittest suite
 ```
 
@@ -279,10 +280,10 @@ Runtime state is per checkout, not global and not committed:
 
 ```text
 proxydb/
-  proxytools.db
-  proxytools.db-wal
-  proxytools.db-shm
-  proxytools.lock
+  proxylister.db
+  proxylister.db-wal
+  proxylister.db-shm
+  proxylister.lock
 geodb/
   geoip.mmdb
   version
@@ -303,7 +304,7 @@ At monitor startup:
 2. recheck saved `STABLE`/`PROBATION` candidates through the active lane;
 3. fetch and check new ProxyScrape candidates through discovery.
 
-`./proxytools --clear` removes known generated runtime artifacts, local locks,
+`./proxylister --clear` removes known generated runtime artifacts, local locks,
 caches, bytecode, and `.venv` while preserving source, Git metadata, arbitrary
 user exports, and `.env` files. Any new generated artifact requires coordinated
 updates to `.gitignore`, cleanup code/tests, and user documentation.
@@ -324,10 +325,11 @@ updates to `.gitignore`, cleanup code/tests, and user documentation.
   implementation-specific details in module docstrings or comments beside the
   relevant code; otherwise update one of the four root documents above
   according to its audience.
-- `release/pve/linux/` contains all Linux PVE provisioning, build orchestration,
-  and infrastructure tests.
-- `release/pve/windows/` is the exclusive home for Windows PVE template, build,
-  and infrastructure-test work.
+- `release/build.py` is the one cross-platform build and PVE entrypoint;
+  `release/buildlib/` owns shared implementation and `release/tests/` owns
+  release-infrastructure regressions.
+- `release/pve/windows/` contains only Windows-native unattended Setup assets.
+  Keep PowerShell limited to the bootstrap that runs before Python is available.
 - Module docstrings at the top of scripts should explain what the file is, why
   it exists, and how it is used.
 - CLI `--help` output is derived from the corresponding module documentation
@@ -346,6 +348,12 @@ tests, reviews, or pull requests. The remote workflow is an additional
 maintainer release layer with implemented Debian build and Ubuntu compatibility
 orchestration.
 
+The build lab deliberately has one standard-library Python control plane:
+`release/build.py`, `release/buildlib/`, and `release/smoke.py`. Do not add an
+alternate Ansible, Make, task-runner, Bash, or PowerShell orchestration path.
+Keep OS-specific commands behind narrow Python adapters; the Windows unattended
+bootstrap may remain PowerShell because it runs before Python is installed.
+
 Generated local build output lives under ignored `release/.work/`. Local dirty-
 worktree artifacts are for development only. A real release requires one clean,
 checksummed source snapshot. Linux dependencies are locked in
@@ -353,17 +361,18 @@ checksummed source snapshot. Linux dependencies are locked in
 reviewed dependency refresh followed by a clean build and both smoke layers.
 
 Successful platform artifacts are isolated under `release/bin/linux/` and
-`release/bin/windows/`. Use the unsuffixed executable names `proxytools` and
-`proxytools.exe`; do not encode OS, architecture, or version in directory or
+`release/bin/windows/`. Use the unsuffixed executable names `proxylister` and
+`proxylister.exe`; do not encode OS, architecture, or version in directory or
 executable names. Put those identities in each executable's metadata and in
 that platform's own manifest. Each platform owns and may replace only its own
 output directory and must preserve the other platform's artifacts.
 
-`release/linux/build.sh` always runs deterministic offline frozen smoke tests.
-`release/linux/smoke-live.sh` is a separate bounded network check and must not
-be folded into the ordinary contributor build gate.
+`python3 release/build.py build linux` always runs deterministic offline frozen
+smoke. `python3 release/smoke.py live release/bin/linux/proxylister` is a
+separate bounded network check and must not be folded into the ordinary
+contributor build gate.
 
-Preserve `.work` after builds for diagnostics. `release/linux/build.sh` removes
+Preserve `.work` after builds for diagnostics. The Python native builder removes
 the previous ignored `release/bin/linux/` at startup and promotes the complete
 latest Linux artifact set there only after a successful build and offline
 smoke. It must preserve `release/bin/windows/`. Do not commit either output or
@@ -381,12 +390,12 @@ Ubuntu 24.04 LTS compatibility template `9001` is also stopped, protected, and
 immutable. It is for running the returned standalone artifact in a disposable
 linked clone, not for producing a second Linux build. Never boot or delete
 either base template directly.
-`release/pve/linux/provision-host.sh` is the authoritative clean-host bootstrap for
-these templates. It validates rather than rewrites site-specific PVE storage
-and networking, verifies official cloud-image checksums, never replaces an
-occupied VMID/image automatically, and retains failed provisioning state for
-diagnosis. Keep its invariants synchronized with `BUILD.md` and the actual
-template contract.
+`python3 release/build.py provision linux` is the authoritative clean-host
+bootstrap for these templates. It validates rather than rewrites site-specific
+PVE storage and networking, verifies official cloud-image checksums, never
+replaces an occupied VMID/image automatically, and retains failed provisioning
+state for diagnosis. Keep its invariants synchronized with `BUILD.md` and the
+actual template contract.
 Verified source media under `/var/lib/vz/template/iso/` is persistent build-lab
 state. Keep cloud images, installation ISOs, and driver ISOs after successful
 template creation so future maintenance does not download them again.
@@ -398,13 +407,14 @@ Before destroying any VM that has installation media attached, detach every
 cached ISO/cloud image from its VM configuration and verify that the config no
 longer references source media. PVE `qm destroy --purge 1` can delete attached
 ISO volumes; exact VMID/name guards alone do not protect the media cache. Every
-project script that invokes `qm destroy --purge 1` must enforce this
+project code path that invokes `qm destroy --purge 1` must enforce this
 detach-and-recheck gate immediately before destruction and must fail closed on
 an unsupported media reference.
-`release/pve/linux/build.sh` is the implemented maintainer build/test orchestrator.
-It builds the current worktree in a disposable Debian clone, validates the same
-artifact through offline and live smoke in Ubuntu, retrieves artifacts/logs,
-deletes only successful exact clones, and retains the active clone on failure.
+`python3 release/build.py build linux --pve` is the implemented maintainer
+build/test orchestrator. It builds the current worktree in a disposable Debian
+clone, validates the same artifact through offline and live smoke in Ubuntu,
+retrieves artifacts/logs, deletes only successful exact clones, and retains the
+active clone on failure.
 Its generated state belongs under `release/.work/pve-linux/`; the artifact is
 promoted to `release/bin/linux/` only after both OS gates pass.
 Its normal mode transfers the current worktree for development. Its explicit
@@ -413,17 +423,21 @@ Its normal mode transfers the current worktree for development. Its explicit
 Build and host provisioning share a PVE-side kernel lock; a contender must exit
 before cleaning local state or touching VMs.
 PVE orchestration regressions are infrastructure checks, not part of the
-project's normal Python test suite. Keep them in the platform's dedicated
-`release/pve/PLATFORM/tests/` directory and run Linux checks explicitly with
-`./release/pve/linux/tests/test_build.sh` and
-`./release/pve/linux/tests/test_provision_host.sh` when changing PVE build,
-cleanup, or host-validation behavior. The root `tests/` directory contains only
-Python tests for source application behavior and must not collect release-lab
-or PVE environment checks.
+project's normal Python test suite. Keep shared offline guards and explicit
+read-only PVE audits under `release/tests/`; run the offline release suite and
+applicable platform audit documented in `BUILD.md` when changing build,
+cleanup, or host-validation behavior. The root `tests/` directory contains
+only Python tests for source application behavior.
 Before a new run, it must reconcile clones retained by previous failures: only
-exact unprotected non-template names `proxytools-debian-build-VMID` and
-`proxytools-ubuntu-validation-VMID` may be shut down and deleted automatically.
-Never weaken these guards or allow stale clones to accumulate across reruns.
+exact unprotected non-template names `proxylister-debian-build-VMID` and
+`proxylister-ubuntu-validation-VMID`, plus their exact former-name equivalents,
+may be shut down and deleted automatically. Never weaken these guards or allow
+stale clones to accumulate across reruns.
+The protected PVE templates and shared host lock retain their former physical
+`proxytools-*` identifiers: they are existing verified infrastructure, not
+public product naming. Code may accept those exact legacy identities only for
+template validation, cross-worktree locking, stale-clone reconciliation, and
+credential migration; all new clones and product artifacts use `proxylister`.
 The dedicated PVE build server `root@192.168.66.2` exists specifically so
 agents can perform project build-lab work autonomously. Once the user requests
 a PVE, template, build, test, validation, repair, or release-lab task, that
@@ -463,10 +477,10 @@ whether the PVE action is allowed. If the execution environment mechanically
 requires approval, describe it only as technical access for the already
 authorized project operation and continue when access is granted.
 
-Remote Linux orchestration is implemented and proven under `release/pve/linux/`.
-Windows template provisioning and native project packaging are implemented and
-proven under `release/pve/windows/`; keep guest-specific mechanics narrow and
-preserve the same lifecycle and safety contract as Linux.
+Linux and Windows orchestration share the Python implementation under
+`release/buildlib/`. Keep guest-specific adapters narrow and preserve one
+lifecycle and safety contract. `release/pve/windows/` contains only the native
+Windows Setup inputs required before Python becomes available.
 
 Provision the Windows template only from pinned official sources: Microsoft
 Windows 11 Enterprise Evaluation x64 media plus Microsoft's published SHA256,
@@ -507,7 +521,7 @@ complete native build/offline-smoke/live-smoke pass. Do not boot, modify,
 unprotect, or delete it during ordinary build work. Use disposable linked
 clones.
 During agent-driven development or debugging of the Windows pipeline, reuse one
-disposable Windows VM across iterations. Refresh code, scripts, and build state
+disposable Windows VM across iterations. Refresh source, build modules, and state
 inside that VM and rerun only the stage being debugged; delete the VM after the
 pipeline problem is fixed. Do not
 reinvoke the top-level orchestrator merely to test each small script change.
@@ -518,12 +532,13 @@ the official Enterprise Evaluation installation and pass an explicit licensed,
 positive-grace-period gate before the build begins. Evaluation media does not
 need a product key, but an unactivated clone is not a valid build guest and may
 be shut down by WLMS during a long build.
-`release/pve/windows/build.sh` transfers one checksummed source snapshot, runs
-native source tests, produces `proxytools.exe`, runs offline and bounded live
-frozen smoke, verifies returned checksums, promotes only
+`python3 release/build.py build windows --pve` transfers one checksummed source
+snapshot, runs native source tests, produces `proxylister.exe`, runs offline and
+bounded live frozen smoke, verifies returned checksums, promotes only
 `release/bin/windows/`, deletes only the successful exact clone, and retains a
-failed clone and diagnostics. Its `--release` mode requires a completely clean
-worktree and archives `HEAD`.
+failed clone and diagnostics. `python3 release/build.py build all --pve --release`
+requires a completely clean worktree and supplies one physical archive of
+`HEAD` to both platform pipelines under the same PVE lock.
 
 The supported standalone scope is:
 
@@ -538,9 +553,9 @@ The supported standalone scope is:
 - one PVE VM-based workflow for both operating systems, no container/VM
   mixture;
 - ephemeral Linux and Windows linked clones controlled from the development
-  machine through the PVE API/SSH and guest SSH/SCP/rsync;
+  machine through PVE-host SSH and guest SSH/SCP;
 - cross-platform process locking with `portalocker` before Windows packaging;
-- embedded defaults that create external `proxytools.conf` on first run.
+- embedded defaults that create external `proxylister.conf` on first run.
 
 Release work happens only for stable versions in a temporary release branch
 and separate worktree. Both binaries must eventually be built from the same
@@ -566,9 +581,9 @@ For normal Python changes, run from the repository root:
 
 ```bash
 ./.venv/bin/python -m unittest discover -v
-find src/proxytools -name '*.py' -print0 \
+find src/proxylister -name '*.py' -print0 \
   | xargs -0 ./.venv/bin/python -m py_compile
-sh -n proxytools
+./.venv/bin/python -m py_compile proxylister
 git diff --check
 git status --short --branch
 ```

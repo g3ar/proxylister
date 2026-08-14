@@ -1,13 +1,14 @@
-# Proxy Tools
+# ProxyLister
 
-Proxy Tools finds public HTTP, SOCKS4, and SOCKS5 proxies, verifies them through a real HTTPS connection, measures latency, identifies the exit IP and country, and can continue monitoring promising proxies until they prove stable.
+ProxyLister finds public HTTP, SOCKS4, and SOCKS5 proxies, verifies them through a real HTTPS connection, measures latency, identifies the exit IP and country, and can continue monitoring promising proxies until they prove stable.
 
 The project has one entrypoint and two modes:
 
 - `list` performs a single scan and prints usable proxy addresses;
 - `monitor` continuously checks proxies in an interactive terminal interface.
 
-The default mode is `list`, so `./proxytools` works immediately after cloning.
+The default mode is `list`, so the root Python launcher works immediately after
+cloning.
 
 ## Quick start with a downloaded binary
 
@@ -17,13 +18,13 @@ all files into one directory, verify them, then run:
 
 ```bash
 sha256sum -c SHA256SUMS
-chmod +x proxytools
-./proxytools
+chmod +x proxylister
+./proxylister
 ```
 
-Keep `proxytools`, `README.md`, and `LICENSE` together. The directory containing
-the executable must be writable: on first use Proxy Tools creates
-`proxytools.conf`, `geodb/`, and `proxydb/` beside it, and `list` writes its
+Keep `proxylister`, `README.md`, and `LICENSE` together. The directory containing
+the executable must be writable: on first use ProxyLister creates
+`proxylister.conf`, `geodb/`, and `proxydb/` beside it, and `list` writes its
 latest valid results to `working_proxies.txt`. No Python installation or `pip`
 command is needed for the standalone binary.
 
@@ -34,7 +35,7 @@ run on an older system, use the source checkout below.
 
 Requirements:
 
-- Linux;
+- Linux or Windows;
 - Python 3.10 or newer with the `venv` module;
 - internet access;
 - Chrome or Chromium only when Selenium validation is requested;
@@ -45,19 +46,29 @@ Clone the project and run it:
 ```bash
 git clone https://github.com/g3ar/proxylister.git
 cd proxylister
-./proxytools
+./proxylister
 ```
 
-On the first real run, the launcher creates a local `.venv` and installs the required Python packages. Nothing needs to be installed manually with `pip`.
+On Windows, invoke the same entrypoint through Python:
+
+```powershell
+py -3 proxylister
+```
+
+The root entrypoint is a standard-library Python launcher. On the first real
+run it creates the platform-appropriate local `.venv` and installs the required
+Python packages. Nothing needs to be installed manually with `pip`. POSIX
+examples below use `./proxylister`; Windows users can substitute
+`py -3 proxylister` (or `python proxylister`).
 
 Useful help commands:
 
 ```bash
-./proxytools --help
-./proxytools list --help
-./proxytools monitor --help
-./proxytools --version
-./proxytools --about
+./proxylister --help
+./proxylister list --help
+./proxylister monitor --help
+./proxylister --version
+./proxylister --about
 ```
 
 ## Typical use cases
@@ -65,7 +76,7 @@ Useful help commands:
 ### Get a plain list of working proxies
 
 ```bash
-./proxytools
+./proxylister
 ```
 
 Normal output contains one connection string per line, sorted by latency:
@@ -78,13 +89,13 @@ socks5://198.51.100.20:1080
 Progress is written to stderr, while proxy addresses are written to stdout. This makes redirection and pipelines safe:
 
 ```bash
-./proxytools > working-proxies.txt
-./proxytools | head -n 10
+./proxylister > working-proxies.txt
+./proxylister | head -n 10
 ```
 
 Every completed scan also atomically replaces `working_proxies.txt` beside the
 launcher or downloaded binary with the same plain valid connection strings.
-If you stop an interactive scan with `Ctrl+C`, Proxy Tools cancels queued work,
+If you stop an interactive scan with `Ctrl+C`, ProxyLister cancels queued work,
 waits only for bounded active checks, and saves the valid proxies collected up
 to that point. Shell redirection remains available when you want a different
 filename or pipeline.
@@ -92,25 +103,25 @@ filename or pipeline.
 ### Find proxies suitable for a particular website
 
 ```bash
-./proxytools --url https://example.com
+./proxylister --url https://example.com
 ```
 
-For each proxy, Proxy Tools first performs its normal HTTPS identity check and then requests the supplied URL through the same proxy. A proxy is printed only when the complete check succeeds.
+For each proxy, ProxyLister first performs its normal HTTPS identity check and then requests the supplied URL through the same proxy. A proxy is printed only when the complete check succeeds.
 
 This is useful when a proxy works generally but the destination website blocks it, returns an error, or cannot be reached from that exit location.
 
 ### Limit acceptable latency
 
 ```bash
-./proxytools --max-latency 300
+./proxylister --max-latency 300
 ```
 
-Only proxies with a median latency below 300 ms are printed. The default comes from `MAX_LATENCY` in `proxytools.conf`.
+Only proxies with a median latency below 300 ms are printed. The default comes from `MAX_LATENCY` in `proxylister.conf`.
 
 ### Inspect detailed scan results
 
 ```bash
-./proxytools --debug
+./proxylister --debug
 ```
 
 Debug output includes latency, protocol, address, connection string, country, coordinates, and a map link. It is intended for inspection rather than direct use as a proxy list.
@@ -118,7 +129,7 @@ Debug output includes latency, protocol, address, connection string, country, co
 ### Validate a website in a real browser
 
 ```bash
-./proxytools list \
+./proxylister list \
   --url https://example.com \
   --browser-check
 ```
@@ -131,7 +142,7 @@ sequential without building a large browser-work queue.
 By default, a successful browser remains visible briefly for inspection. On a server without a graphical session, use:
 
 ```bash
-./proxytools list \
+./proxylister list \
   --url https://example.com \
   --browser-check \
   --headless
@@ -142,7 +153,7 @@ By default, a successful browser remains visible briefly for inspection. On a se
 ### Monitor proxies until they become stable
 
 ```bash
-./proxytools monitor
+./proxylister monitor
 ```
 
 The monitor continuously finds, checks, and rechecks proxies in a full-screen terminal interface. It is useful when a single scan is not enough and you want candidates that have remained healthy across multiple checks over time.
@@ -174,7 +185,7 @@ The status area reports only what the monitor is doing, such as loading saved pr
 ### Monitor access to one specific website
 
 ```bash
-./proxytools monitor --url https://whatismyipaddress.com/
+./proxylister monitor --url https://whatismyipaddress.com/
 ```
 
 Every proxy must pass both the normal HTTPS identity check and a lightweight request to this URL. HTTP 403 is accepted because anti-bot sites frequently reject automated requests while remaining usable in a browser. Other HTTP errors and network failures prevent the check from being accepted.
@@ -240,7 +251,7 @@ selected.
 - Only one browser session can be launched by one monitor at a time.
 - Temporary profile data is removed after the launched browser closes.
 
-`MONITOR_BROWSER` in `proxytools.conf` selects `auto`, `chrome`, or `firefox`. In `auto` mode, Chrome/Chromium is preferred and Firefox is used as a fallback.
+`MONITOR_BROWSER` in `proxylister.conf` selects `auto`, `chrome`, or `firefox`. In `auto` mode, Chrome/Chromium is preferred and Firefox is used as a fallback.
 
 Private browsing isolates the temporary session from the main profile. It is not a complete anonymity guarantee.
 
@@ -250,7 +261,7 @@ Press `q` or `Ctrl+C` to stop. Both use the same graceful shutdown path. Work th
 
 ## About and credits
 
-Run `./proxytools --about` from the shell or press `F1` in the monitor to see the project name, one-sentence description, current version, contributor list, and build date. Both interfaces use the same project metadata.
+Run `./proxylister --about` from the shell or press `F1` in the monitor to see the project name, one-sentence description, current version, contributor list, and build date. Both interfaces use the same project metadata.
 
 Source checkouts display the project build year. A downloaded standalone
 binary displays its exact UTC build time and source commit, embedded anew by
@@ -296,7 +307,7 @@ This is why a proxy can have a measured median and appear in the table while rem
 
 ## Configuration
 
-Persistent defaults live in `proxytools.conf` beside the launcher:
+Persistent defaults live in `proxylister.conf` beside the launcher:
 
 ```text
 KEY=value
@@ -332,12 +343,12 @@ The parser is intentionally strict. Unknown keys, duplicate keys, missing requir
 | `MONITOR_RETENTION_TIME` | Seconds to track proxies no longer advertised by ProxyScrape |
 | `MONITOR_BROWSER` | Browser used by `b`: `auto`, `chrome`, or `firefox` |
 
-The comments inside `proxytools.conf` describe valid ranges and defaults in more detail.
+The comments inside `proxylister.conf` describe valid ranges and defaults in more detail.
 
 CLI options override `URL` and `MAX_LATENCY` for one invocation without modifying the file:
 
 ```bash
-./proxytools monitor \
+./proxylister monitor \
   --url https://example.com \
   --max-latency 350
 ```
@@ -348,10 +359,10 @@ Generated state is stored beside the launcher but outside the project root's vis
 
 ```text
 proxydb/
-  proxytools.db
-  proxytools.db-wal
-  proxytools.db-shm
-  proxytools.lock
+  proxylister.db
+  proxylister.db-wal
+  proxylister.db-shm
+  proxylister.lock
 
 geodb/
   geoip.mmdb
@@ -360,14 +371,17 @@ geodb/
 
 `proxydb/` contains monitor history and the per-clone process lock. `geodb/` contains the automatically downloaded monthly DB-IP City Lite database. Both directories are ignored by Git.
 
-Existing files from older versions are moved from the project root into these directories automatically.
+Existing database, lock, GeoIP, and configuration files named `proxytools*`
+are moved to their `proxylister` names automatically. The migration preserves
+the SQLite database and user-edited configuration; it does not create a second
+runtime state.
 
-Each clone has its own state. Two separate clones may run simultaneously, but two working Proxy Tools commands cannot run from the same clone at the same time.
+Each clone has its own state. Two separate clones may run simultaneously, but two working ProxyLister commands cannot run from the same clone at the same time.
 
 ## Resetting local state
 
 ```bash
-./proxytools --clear
+./proxylister --clear
 ```
 
 This returns the directory to its freshly cloned runtime state by removing:
@@ -406,7 +420,7 @@ Install Chrome, Chromium, or Firefox, or set `MONITOR_BROWSER` to a browser that
 
 ### Country differs from a website's result
 
-Proxy Tools resolves the measured HTTPS exit IP through a local monthly GeoIP database. Commercial websites may use newer or different location data, and some proxies route different destinations through different exits. Country data is therefore useful for filtering but cannot be guaranteed to match every website.
+ProxyLister resolves the measured HTTPS exit IP through a local monthly GeoIP database. Commercial websites may use newer or different location data, and some proxies route different destinations through different exits. Country data is therefore useful for filtering but cannot be guaranteed to match every website.
 
 ### A proxy has latency but is not stable
 

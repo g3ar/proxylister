@@ -1,12 +1,12 @@
 # Prepare the minimal Windows build-template guest after unattended Setup.
 #
 # Windows Setup invokes this once at the first local administrator logon. All
-# third-party payloads come from the generated PROXYTOOLS answer ISO after the
+# third-party payloads come from the generated PROXYLISTER answer ISO after the
 # PVE-side provisioner has verified their pinned checksums.
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
-$LogPath = "C:\proxytools-template-setup.log"
+$LogPath = "C:\proxylister-template-setup.log"
 $PythonSha256 = "EDEC09C4853AEAE9AC36EFB8C9F95B6B8E2FEE65EEE56D9767A8B7C69C574403"
 $OpenSshSha256 = "DDEC9C53864280759CF9F74791CEFD387100E3946AA849A1C138A4ED1B96B7D9"
 
@@ -144,7 +144,7 @@ powercfg.exe /change monitor-timeout-ac 0
 # Build activity is intentionally trusted inside this disposable lab guest.
 if (Get-Command Set-MpPreference -ErrorAction SilentlyContinue) {
     Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction Continue
-    Add-MpPreference -ExclusionPath "C:\proxytools-build", "C:\Users\builder\proxytools" `
+    Add-MpPreference -ExclusionPath "C:\proxylister-build", "C:\Users\builder\proxylister" `
         -ErrorAction Continue
 }
 
@@ -156,7 +156,7 @@ $ready = [ordered]@{
     virtio_source = (Split-Path -Leaf $virtioInstaller)
     prepared_utc = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
 }
-$ready | ConvertTo-Json | Set-Content -LiteralPath "C:\proxytools-template-ready.json" -Encoding utf8
+$ready | ConvertTo-Json | Set-Content -LiteralPath "C:\proxylister-template-ready.json" -Encoding utf8
 Write-Output "stage=ready"
 
 # The template is a single-purpose build appliance. Clones intentionally keep

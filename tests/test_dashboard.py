@@ -4,16 +4,16 @@ from unittest.mock import Mock, patch
 
 from textual.widgets import DataTable, SelectionList, Static
 
-from proxytools.about import format_about
-from proxytools.monitoring import MonitorEngine, MonitorRow, MonitorSnapshot
-from proxytools.output.dashboard import ProxyMonitorApp
-from proxytools.output.dashboard_widgets import (
+from proxylister.about import format_about
+from proxylister.monitoring import MonitorEngine, MonitorRow, MonitorSnapshot
+from proxylister.output.dashboard import ProxyMonitorApp
+from proxylister.output.dashboard_widgets import (
     AboutScreen,
     ProtocolSelectionList,
     ProxyDetailsScreen,
     ShortcutFooter,
 )
-from proxytools.stability import StabilityConfig, StabilityPolicy
+from proxylister.stability import StabilityConfig, StabilityPolicy
 
 
 class DashboardTests(unittest.IsolatedAsyncioTestCase):
@@ -150,7 +150,7 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             process = Mock()
             process.poll.return_value = None
             with patch(
-                "proxytools.output.dashboard.launch_browser_session",
+                "proxylister.output.dashboard.launch_browser_session",
                 return_value=("Chrome", process),
             ):
                 app.action_browser()

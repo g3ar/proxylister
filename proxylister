@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+"""Cross-platform source launcher for ProxyLister.
+
+The launcher uses only the Python standard library so it can create and
+refresh the checkout-local virtual environment before project dependencies are
+available. POSIX users execute it directly; Windows users pass this same file
+to their Python launcher.
+"""
+
+from __future__ import annotations
+
+import filecmp
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+
+MINIMUM_PYTHON = (3, 10)
+DEPENDENCY_IMPORTS = (
+    "import maxminddb, proxylister, requests, rich, selenium, socks, textual"
+)
+HELP = """Usage: ./proxylister <command> [options]
+
+Commands:
+  list       Find and print working proxies (default)
+  monitor    Monitor proxies until they meet stability criteria
+  help       Show this help
+
+Options:
+  --version  Show the installed ProxyLister version
+  --about    Show project information and credits
+  --clear    Remove local databases, environment, locks, and generated caches
+
+Run ./proxylister <command> --help for command-specific options.
+On first use, a local .venv and the required dependencies are created automatically.
+"""
+
+
+def _venv_python(venv: Path, platform: str | None = None) -> Path:
+    """Return the interpreter path for a virtual environment on either OS."""
+    platform = os.name if platform is None else platform
+    if platform == "nt":
+        return venv / "Scripts/python.exe"
+    return venv / "bin/python"
+
+
+def _command(argv: list[str]) -> tuple[str, list[str]]:
+    """Apply the public default-command and option routing rules."""
+    if not argv:
+        return "list", []
+    first, remaining = argv[0], argv[1:]
+    commands = {
+        "list", "monitor", "help", "-h", "--help", "--version",
+        "--about", "--abut", "--clear",
+    }
+    if first in commands:
+        return first, remaining
+    if first.startswith("-"):
+        return "list", argv
+    return first, remaining
+
+
+def _runtime_environment(root: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    source = os.fspath(root / "src")
+    existing = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = source if not existing else os.pathsep.join((source, existing))
+    env["PROXYLISTER_HOME"] = os.fspath(root)
+    return env
+
+
+def _replace_process(python: Path, arguments: list[str], root: Path) -> None:
+    os.chdir(root)
+    executable = os.fspath(python)
+    os.execve(executable, [executable, *arguments], _runtime_environment(root))
+
+
+def _dependencies_are_current(root: Path, python: Path, stamp: Path) -> bool:
+    metadata = root / "pyproject.toml"
+    if not stamp.is_file() or not filecmp.cmp(metadata, stamp, shallow=False):
+        return False
+    result = subprocess.run(
+        [python, "-c", DEPENDENCY_IMPORTS],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def _prepare_environment(root: Path) -> Path:
+    venv = root / ".venv"
+    python = _venv_python(venv)
+    legacy_metadata = root / "src/proxytools.egg-info"
+    if legacy_metadata.is_dir() and not legacy_metadata.is_symlink():
+        shutil.rmtree(legacy_metadata)
+    elif legacy_metadata.exists() or legacy_metadata.is_symlink():
+        legacy_metadata.unlink()
+    if not python.is_file():
+        print(f"Creating local Python environment in {venv} ...", file=sys.stderr)
+        subprocess.run([sys.executable, "-m", "venv", venv], check=True)
+    stamp = venv / ".proxylister-package-metadata"
+    legacy_stamp = venv / ".proxytools-package-metadata"
+    if not stamp.exists() and legacy_stamp.exists():
+        legacy_stamp.replace(stamp)
+    if not _dependencies_are_current(root, python, stamp):
+        print("Installing dependencies ...", file=sys.stderr)
+        subprocess.run([python, "-m", "pip", "install", "-e", root], check=True)
+        subprocess.run(
+            [python, "-m", "pip", "uninstall", "-y", "proxytools"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        shutil.copy2(root / "pyproject.toml", stamp)
+    return python
+
+
+def main(argv: list[str] | None = None) -> int:
+    if sys.version_info < MINIMUM_PYTHON:
+        required = ".".join(map(str, MINIMUM_PYTHON))
+        print(f"proxylister: Python {required} or newer is required", file=sys.stderr)
+        return 1
+
+    root = Path(__file__).resolve().parent
+    command, remaining = _command(list(sys.argv[1:] if argv is None else argv))
+    if command in {"help", "-h", "--help"}:
+        print(HELP, end="")
+        return 0
+    if command == "--clear":
+        _replace_process(Path(sys.executable), ["-m", "proxylister.cleanup"], root)
+        return 0
+    if command not in {"list", "monitor", "--version", "--about", "--abut"}:
+        print(f"proxylister: unknown command: {command}\n", file=sys.stderr)
+        print(HELP, end="", file=sys.stderr)
+        return 2
+
+    python = _prepare_environment(root)
+    _replace_process(python, ["-m", "proxylister", command, *remaining], root)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except subprocess.CalledProcessError as error:
+        print(
+            f"proxylister: environment bootstrap failed with exit code {error.returncode}",
+            file=sys.stderr,
+        )
+        raise SystemExit(error.returncode or 1)
+    except OSError as error:
+        print(f"proxylister: environment bootstrap failed: {error}", file=sys.stderr)
+        raise SystemExit(1)

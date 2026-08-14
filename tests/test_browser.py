@@ -3,19 +3,19 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from proxytools.browser import BrowserUnavailable, find_browser
-from proxytools.browser_session import chrome_command, firefox_command
+from proxylister.browser import BrowserUnavailable, find_browser
+from proxylister.browser_session import chrome_command, firefox_command
 
 
 class BrowserSessionTests(unittest.TestCase):
     def test_auto_prefers_chrome_and_explicit_firefox_is_respected(self):
         paths = {"google-chrome": "/bin/chrome", "firefox": "/bin/firefox"}
-        with patch("proxytools.browser.shutil.which", side_effect=paths.get):
+        with patch("proxylister.browser.shutil.which", side_effect=paths.get):
             self.assertEqual(find_browser("auto"), ("chrome", "/bin/chrome"))
             self.assertEqual(find_browser("firefox"), ("firefox", "/bin/firefox"))
 
     def test_missing_browser_has_useful_error(self):
-        with patch("proxytools.browser.shutil.which", return_value=None):
+        with patch("proxylister.browser.shutil.which", return_value=None):
             with self.assertRaises(BrowserUnavailable):
                 find_browser("auto")
 

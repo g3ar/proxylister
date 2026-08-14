@@ -33,14 +33,14 @@
         </OSImage>
       </ImageInstall>
       <DynamicUpdate><Enable>false</Enable><WillShowUI>Never</WillShowUI></DynamicUpdate>
-      <UserData><AcceptEula>true</AcceptEula><FullName>Proxy Tools</FullName><Organization>Proxy Tools</Organization></UserData>
+      <UserData><AcceptEula>true</AcceptEula><FullName>ProxyLister</FullName><Organization>ProxyLister</Organization></UserData>
     </component>
   </settings>
   <settings pass="specialize">
     <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-      <ComputerName>PROXYTOOLS-BLD</ComputerName>
-      <RegisteredOwner>Proxy Tools</RegisteredOwner>
-      <RegisteredOrganization>Proxy Tools</RegisteredOrganization>
+      <ComputerName>PROXYLISTER-BLD</ComputerName>
+      <RegisteredOwner>ProxyLister</RegisteredOwner>
+      <RegisteredOrganization>ProxyLister</RegisteredOrganization>
       <TimeZone>FLE Standard Time</TimeZone>
     </component>
   </settings>
@@ -50,10 +50,10 @@
     </component>
     <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
       <OOBE><HideEULAPage>true</HideEULAPage><HideLocalAccountScreen>true</HideLocalAccountScreen><HideOnlineAccountScreens>true</HideOnlineAccountScreens><HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE><ProtectYourPC>3</ProtectYourPC><SkipMachineOOBE>true</SkipMachineOOBE><SkipUserOOBE>true</SkipUserOOBE></OOBE>
-      <UserAccounts><LocalAccounts><LocalAccount wcm:action="add"><Name>builder</Name><Group>Administrators</Group><DisplayName>Proxy Tools Builder</DisplayName><Password><Value>@@PASSWORD@@</Value><PlainText>true</PlainText></Password></LocalAccount></LocalAccounts></UserAccounts>
+      <UserAccounts><LocalAccounts><LocalAccount wcm:action="add"><Name>builder</Name><Group>Administrators</Group><DisplayName>ProxyLister Builder</DisplayName><Password><Value>@@PASSWORD@@</Value><PlainText>true</PlainText></Password></LocalAccount></LocalAccounts></UserAccounts>
       <AutoLogon><Enabled>true</Enabled><LogonCount>1</LogonCount><Username>builder</Username><Password><Value>@@PASSWORD@@</Value><PlainText>true</PlainText></Password></AutoLogon>
       <FirstLogonCommands>
-        <SynchronousCommand wcm:action="add"><Order>1</Order><Description>Prepare Proxy Tools build template</Description><RequiresUserInput>false</RequiresUserInput><CommandLine>powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "$m=(Get-Volume -FileSystemLabel PROXYTOOLS).DriveLetter; &amp; ([string]$m + ':\bootstrap.ps1')"</CommandLine></SynchronousCommand>
+        <SynchronousCommand wcm:action="add"><Order>1</Order><Description>Prepare ProxyLister build template</Description><RequiresUserInput>false</RequiresUserInput><CommandLine>powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "$m=(Get-Volume -FileSystemLabel PROXYLISTER).DriveLetter; &amp; ([string]$m + ':\bootstrap.ps1')"</CommandLine></SynchronousCommand>
       </FirstLogonCommands>
     </component>
   </settings>

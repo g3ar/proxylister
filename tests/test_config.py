@@ -2,16 +2,16 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from proxytools.config import ConfigError, load_config
+from proxylister.config import ConfigError, load_config
 
 
 class ConfigTests(unittest.TestCase):
     def setUp(self):
-        self.source = Path(__file__).parents[1] / "proxytools.conf"
+        self.source = Path(__file__).parents[1] / "proxylister.conf"
 
     def _load_text(self, text):
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "proxytools.conf"
+            path = Path(directory) / "proxylister.conf"
             path.write_text(text, encoding="utf-8")
             return load_config(path)
 

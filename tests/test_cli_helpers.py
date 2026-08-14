@@ -1,11 +1,11 @@
 import unittest
 
-from proxytools.config import web_url
-from proxytools.models import ProxyResult
-from proxytools.output.dashboard_widgets import format_duration
-from proxytools.output.results import filter_and_sort
-from proxytools.stability import ProxyHistory, StabilityConfig, StabilityPolicy
-from proxytools.stability.history import expire_histories, update_advertised
+from proxylister.config import web_url
+from proxylister.models import ProxyResult
+from proxylister.output.dashboard_widgets import format_duration
+from proxylister.output.results import filter_and_sort
+from proxylister.stability import ProxyHistory, StabilityConfig, StabilityPolicy
+from proxylister.stability.history import expire_histories, update_advertised
 
 
 class CliHelperTests(unittest.TestCase):
