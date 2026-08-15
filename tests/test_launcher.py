@@ -13,6 +13,10 @@ LAUNCHER_NAMESPACE = runpy.run_path(os.fspath(LAUNCHER))
 
 
 class LauncherTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "POSIX executable mode is not used on Windows")
+    def test_root_launcher_is_executable(self):
+        self.assertTrue(os.access(LAUNCHER, os.X_OK))
+
     def test_virtual_environment_interpreter_is_platform_specific(self):
         venv = Path("checkout") / ".venv"
         resolve = LAUNCHER_NAMESPACE["_venv_python"]
