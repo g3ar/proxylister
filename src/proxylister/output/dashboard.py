@@ -14,6 +14,7 @@ from textual.widgets import DataTable, Static
 
 from proxylister.about import format_about
 from proxylister.browser import BrowserUnavailable, launch_browser_session
+from proxylister.clipboard import copy_to_system_clipboard
 from proxylister.monitoring import MonitorEngine, MonitorRow, MonitorSnapshot
 from proxylister.output.dashboard_widgets import (
     AboutScreen,
@@ -467,7 +468,12 @@ class ProxyMonitorApp(App):
         if row is None:
             self.notify("No proxy selected", severity="warning")
             return
-        self.copy_to_clipboard(row.connection)
+        try:
+            if not copy_to_system_clipboard(row.connection):
+                self.copy_to_clipboard(row.connection)
+        except OSError as error:
+            self.notify(f"Could not copy connection: {error}", severity="error")
+            return
         self.notify(f"Copied {row.connection}")
 
     def action_clear_selection(self):

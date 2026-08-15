@@ -50,6 +50,55 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Q", rendered)
             self.assertEqual(len(rendered), footer.size.width)
 
+    async def test_y_uses_native_clipboard_without_emitting_osc52(self):
+        app = ProxyMonitorApp(Mock(), autostart=False)
+        row = MonitorRow(
+            key=("http", "192.0.2.1:80"), state="PROBATION",
+            alive_seconds=30, checks=2, required_checks=5, streak=2,
+            success_rate=1, median_latency=100, p95_latency=120, jitter=10,
+            country="France", blockers=("checks",),
+            connection="http://192.0.2.1:80",
+        )
+        snapshot = MonitorSnapshot(1, 1, 1, 0, 1, "waiting", 10, (row,))
+
+        with patch(
+            "proxylister.output.dashboard.copy_to_system_clipboard",
+            return_value=True,
+        ) as native_copy, patch.object(app, "copy_to_clipboard") as osc52_copy:
+            async with app.run_test() as pilot:
+                app.receive_snapshot(snapshot)
+                await pilot.pause()
+                await pilot.press("down")
+                await pilot.press("y")
+
+        native_copy.assert_called_once_with(row.connection)
+        osc52_copy.assert_not_called()
+
+    async def test_y_reports_native_clipboard_failure(self):
+        app = ProxyMonitorApp(Mock(), autostart=False)
+        row = MonitorRow(
+            key=("http", "192.0.2.1:80"), state="PROBATION",
+            alive_seconds=30, checks=2, required_checks=5, streak=2,
+            success_rate=1, median_latency=100, p95_latency=120, jitter=10,
+            country="France", blockers=("checks",),
+            connection="http://192.0.2.1:80",
+        )
+        snapshot = MonitorSnapshot(1, 1, 1, 0, 1, "waiting", 10, (row,))
+
+        with patch(
+            "proxylister.output.dashboard.copy_to_system_clipboard",
+            side_effect=OSError("clipboard busy"),
+        ), patch.object(app, "notify") as notify:
+            async with app.run_test() as pilot:
+                app.receive_snapshot(snapshot)
+                await pilot.pause()
+                await pilot.press("down")
+                await pilot.press("y")
+
+        notify.assert_called_once_with(
+            "Could not copy connection: clipboard busy", severity="error"
+        )
+
     async def test_selection_can_be_released_without_moving_the_viewport(self):
         app = ProxyMonitorApp(Mock(), autostart=False)
         rows = tuple(
@@ -285,7 +334,11 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Blocked by: alive, checks", details)
             self.assertIn("P95: 120ms", details)
             await pilot.press("escape")
-            await pilot.press("y")
+            with patch(
+                "proxylister.output.dashboard.copy_to_system_clipboard",
+                return_value=False,
+            ):
+                await pilot.press("y")
             self.assertEqual(app._clipboard, row.connection)
             second_row = replace(
                 row,

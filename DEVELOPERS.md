@@ -278,7 +278,9 @@ DataTable width remains clickable, including space beyond rendered cell text.
 The main table intentionally has one compact layout: State, Country, Median,
 Alive, and Connection. Detailed proxy analytics belong in the `Enter` modal,
 not additional permanent columns or a separate debug mode. The `y` action uses
-Textual's OSC 52 support; do not add platform clipboard dependencies.
+the standard-library Win32 Unicode clipboard on Windows because Windows 10
+Console does not reliably handle OSC 52. Other platforms retain Textual's OSC
+52 support; do not add external platform clipboard dependencies.
 
 The normal status area shows only the current user-facing activity. Internal
 cycle, tracked, stable, and visible counters remain available in snapshots but

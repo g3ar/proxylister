@@ -103,7 +103,8 @@ Monitor controls currently include:
 - `c` — choose country;
 - `b` — open the configured URL through the selected proxy in an isolated
   private browser session and release the table selection;
-- `y` — copy the selected connection string with OSC 52;
+- `y` — copy the selected connection string through the native Windows
+  clipboard or OSC 52 on other platforms;
 - `q` or `Ctrl+C` — display live shutdown progress, finish bounded active work,
   and exit through the same graceful path.
 

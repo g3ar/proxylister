@@ -211,7 +211,7 @@ When a URL is configured, pressing `b` opens that same address through the selec
 | `p` | Choose visible protocols |
 | `c` | Search for and select a country |
 | `b` | Open the selected proxy in a private browser session |
-| `y` | Copy the selected connection string to the terminal clipboard |
+| `y` | Copy the selected connection string to the system clipboard |
 | `q` or `Ctrl+C` | Gracefully stop the monitor and quit |
 
 ### Inspect one proxy
@@ -240,7 +240,12 @@ The status line always lists the filters currently applied. An empty selection i
 
 ### Copy or open the selected proxy
 
-Press `y` to copy the complete connection string, such as `socks5://198.51.100.20:1080`. Copying uses the terminal's OSC 52 protocol and requires no `xclip` or `xsel`. Most current terminals support it locally and through SSH, although terminal or multiplexer security settings may disable it.
+Press `y` to copy the complete connection string, such as
+`socks5://198.51.100.20:1080`. On Windows, ProxyLister writes Unicode text
+directly to the Win32 clipboard, including when running in the Windows 10
+Console. Other platforms use the terminal's OSC 52 protocol, which needs no
+`xclip` or `xsel` but may be disabled by terminal or multiplexer security
+settings.
 
 Press `b` to open the configured URL through the selected proxy in a disposable private browser session. If no `--url` or `URL` setting is configured, the browser opens a blank page so you can enter an address manually.
 The selection is cleared as the browser starts, so background updates do not

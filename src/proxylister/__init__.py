@@ -1,3 +1,3 @@
 """Tools for discovering, checking, and monitoring public proxies."""
 
-__version__ = "1.0.1"
+__version__ = "1.0.2"
