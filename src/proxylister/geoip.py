@@ -17,6 +17,8 @@ from pathlib import Path
 import shutil
 import tempfile
 import threading
+import time
+from typing import Callable
 
 import maxminddb
 import requests
@@ -25,6 +27,8 @@ from proxylister.paths import geoip_database_path, geoip_version_path
 
 DBIP_URL = "https://download.db-ip.com/free/dbip-city-lite-{version}.mmdb.gz"
 ATTRIBUTION = "IP Geolocation by DB-IP (https://db-ip.com)"
+DOWNLOAD_CHUNK_SIZE = 64 * 1024
+SOCKET_TIMEOUT = 10
 _reader = None
 _reader_lock = threading.Lock()
 
@@ -41,7 +45,12 @@ def _current_version(now=None) -> str:
     return now.strftime("%Y-%m")
 
 
-def ensure_geoip_database(*, timeout=60, now=None) -> GeoIPStatus:
+def ensure_geoip_database(
+    *,
+    timeout=60,
+    now=None,
+    progress: Callable[[int, int | None], None] | None = None,
+) -> GeoIPStatus:
     """Ensure this clone has the current monthly DB-IP City Lite database."""
     database = geoip_database_path()
     version_file = geoip_version_path()
@@ -58,15 +67,31 @@ def ensure_geoip_database(*, timeout=60, now=None) -> GeoIPStatus:
     unpacked = None
     response = None
     try:
-        response = requests.get(DBIP_URL.format(version=version), stream=True, timeout=timeout)
+        deadline = time.monotonic() + timeout
+        io_timeout = min(timeout, SOCKET_TIMEOUT)
+        response = requests.get(
+            DBIP_URL.format(version=version),
+            stream=True,
+            timeout=(io_timeout, io_timeout),
+        )
         response.raise_for_status()
+        try:
+            total = int(response.headers.get("Content-Length", "")) or None
+        except (TypeError, ValueError):
+            total = None
+        downloaded = 0
         with tempfile.NamedTemporaryFile(
             dir=database.parent, prefix=".proxylister-geoip-", delete=False
         ) as archive:
             compressed = Path(archive.name)
-            for chunk in response.iter_content(chunk_size=1024 * 1024):
+            for chunk in response.iter_content(chunk_size=DOWNLOAD_CHUNK_SIZE):
+                if time.monotonic() >= deadline:
+                    raise requests.Timeout(f"download exceeded {timeout:g} seconds")
                 if chunk:
                     archive.write(chunk)
+                    downloaded += len(chunk)
+                    if progress is not None:
+                        progress(downloaded, total)
         with tempfile.NamedTemporaryFile(
             dir=database.parent, prefix=".proxylister-geoip-", delete=False
         ) as target:

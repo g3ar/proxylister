@@ -267,13 +267,57 @@ class ProxyLibraryTests(unittest.TestCase):
         with patch.object(http.requests, "Session") as session_factory:
             with http.proxy_session() as current:
                 self.assertIs(current, session_factory.return_value)
+            adapter = session_factory.return_value.mount.call_args.args[1]
+            self.assertIsInstance(adapter, http._ProxyTLSAdapter)
             session_factory.return_value.close.assert_called_once_with()
+
+    def test_proxy_sessions_share_verified_tls_context_only(self):
+        request = requests.Request("GET", "https://api.ipify.org").prepare()
+        first = http._ProxyTLSAdapter()
+        second = http._ProxyTLSAdapter()
+        try:
+            _host, first_pool = first.build_connection_pool_key_attributes(
+                request, True
+            )
+            _host, second_pool = second.build_connection_pool_key_attributes(
+                request, True
+            )
+            self.assertIs(first_pool["ssl_context"], second_pool["ssl_context"])
+            self.assertTrue(first_pool["ssl_context"].check_hostname)
+
+            connection = Mock()
+            first.cert_verify(connection, request.url, True, None)
+            self.assertEqual(connection.cert_reqs, "CERT_REQUIRED")
+            self.assertIsNone(connection.ca_certs)
+            self.assertIsNone(connection.ca_cert_dir)
+        finally:
+            first.close()
+            second.close()
+
+    def test_custom_tls_bundle_does_not_use_shared_context(self):
+        request = requests.Request("GET", "https://api.ipify.org").prepare()
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = Path(directory) / "custom.pem"
+            bundle.touch()
+            adapter = http._ProxyTLSAdapter()
+            try:
+                _host, pool = adapter.build_connection_pool_key_attributes(
+                    request, str(bundle)
+                )
+            finally:
+                adapter.close()
+
+        self.assertNotIn("ssl_context", pool)
+        self.assertEqual(pool["ca_certs"], str(bundle))
 
     @unittest.skipUnless(Path("/proc/self/fd").is_dir(), "requires Linux /proc descriptor accounting")
     def test_repeated_proxy_checks_do_not_accumulate_descriptors(self):
         class DescriptorSession:
             def __init__(self):
                 self.read_fd, self.write_fd = os.pipe()
+
+            def mount(self, *_args):
+                pass
 
             def get(self, *_args, **_kwargs):
                 return FakeResponse(payload={"ip": "203.0.113.20"})

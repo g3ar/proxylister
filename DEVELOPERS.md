@@ -198,6 +198,10 @@ including every response, on success and on every error path. Requests caches
 a connection manager for each proxy URL; feeding unlimited public proxies to a
 shared session eventually exhausts file descriptors. Thread-local sessions are
 appropriate only for bounded upstream services such as the candidate source.
+Short-lived proxy sessions share one immutable default TLS trust context so
+Windows does not reload the bundled CA file for every candidate. Custom CA
+paths retain Requests' normal per-session behavior. Never extend this sharing
+to proxy managers, pools, responses, or sockets.
 
 ## `list` flow
 
@@ -410,7 +414,9 @@ may run simultaneously.
 decompresses it through temporary files, validates it with `maxminddb`, then
 atomically replaces the active database and version marker. A failed update
 keeps a valid old database. Without a usable database, checks continue with
-location `Unknown`.
+location `Unknown`. The streaming download reports byte progress and has both
+short socket timeouts and a total deadline checked between small chunks so a
+stalled GeoIP service does not hold command startup indefinitely.
 
 The shared reader supports concurrent lookups. Keep DB-IP attribution visible
 in user documentation.

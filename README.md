@@ -404,7 +404,11 @@ Source files, Git metadata, `.env` files, and arbitrary redirected user output a
 
 ### The first source run takes a while
 
-The first real command creates `.venv`, installs dependencies, and downloads the monthly GeoIP database. Later starts reuse them.
+The first real command creates `.venv`, installs dependencies, and downloads
+the monthly GeoIP database. The download is about 60 MiB and reports its
+progress. If it cannot finish within 60 seconds, ProxyLister continues with
+locations shown as `Unknown` instead of blocking startup. Later starts reuse a
+successfully downloaded database.
 
 ### Few or no proxies are found
 

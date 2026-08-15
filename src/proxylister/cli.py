@@ -75,7 +75,33 @@ def main(argv=None):
             from proxylister.geoip import ATTRIBUTION, configure_geoip, ensure_geoip_database
 
             print("Checking local GeoIP database…", file=sys.stderr)
-            geoip = ensure_geoip_database()
+            showed_progress = False
+            last_progress = -1
+
+            def show_geoip_progress(downloaded, total):
+                nonlocal showed_progress, last_progress
+                current_progress = (
+                    downloaded * 100 // total if total else downloaded // (1024 * 1024)
+                )
+                if current_progress == last_progress:
+                    return
+                last_progress = current_progress
+                showed_progress = True
+                received = downloaded / (1024 * 1024)
+                if total:
+                    amount = f"{received:.1f}/{total / (1024 * 1024):.1f} MiB"
+                else:
+                    amount = f"{received:.1f} MiB"
+                print(
+                    f"\rDownloading GeoIP database… {amount}",
+                    end="",
+                    file=sys.stderr,
+                    flush=True,
+                )
+
+            geoip = ensure_geoip_database(progress=show_geoip_progress)
+            if showed_progress:
+                print(file=sys.stderr)
             configure_geoip(geoip.path)
             if geoip.updated:
                 print(f"Updated {geoip.path.name}. {ATTRIBUTION}", file=sys.stderr)
