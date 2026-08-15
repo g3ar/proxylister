@@ -39,6 +39,13 @@ class FakeResponse:
 
 
 class ProxyLibraryTests(unittest.TestCase):
+    def test_windows_break_uses_the_graceful_interrupt_path(self):
+        with patch.object(list_command.signal, "SIGBREAK", 99, create=True):
+            self.assertEqual(
+                list_command.interrupt_signals(),
+                (list_command.signal.SIGINT, 99),
+            )
+
     def test_list_defers_sigint_until_progress_cleanup_and_saves_partial_results(self):
         class FragileProgress:
             def __enter__(self):

@@ -223,7 +223,8 @@ location.
 `working_proxies.txt` beside the launcher or frozen executable. A normal
 `Ctrl+C` must defer interruption while Rich/executor locks are active, complete
 bounded shutdown, and save valid results collected so far without displaying
-`release unlocked lock`.
+`release unlocked lock`. On Windows, `SIGBREAK` uses the same graceful path so
+the live-smoke process group can request bounded interruption safely.
 
 When `--url` or config `URL` is present, check it with lightweight `requests`
 through every proxy. Do not invoke Selenium for continuous URL checks. HTTP 403

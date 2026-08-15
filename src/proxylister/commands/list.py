@@ -55,6 +55,14 @@ def validate_args(parser, args):
         parser.error("--headless requires --browser-check")
 
 
+def interrupt_signals():
+    """Return user interruption signals supported by the current platform."""
+    signals = [signal.SIGINT]
+    if hasattr(signal, "SIGBREAK"):
+        signals.append(signal.SIGBREAK)
+    return tuple(signals)
+
+
 def check_candidate(protocol, proxy, timeout, samples, url):
     """Run HTTPS identity and optional target checks without Selenium."""
     result = check_proxy(protocol, proxy, timeout, samples)
@@ -73,17 +81,20 @@ def deferred_sigint():
         yield lambda: False
         return
 
-    previous = signal.getsignal(signal.SIGINT)
+    handled_signals = interrupt_signals()
+    previous = {current: signal.getsignal(current) for current in handled_signals}
 
     def request_interrupt(_signum, _frame):
         nonlocal requested
         requested = True
 
-    signal.signal(signal.SIGINT, request_interrupt)
+    for current in handled_signals:
+        signal.signal(current, request_interrupt)
     try:
         yield lambda: requested
     finally:
-        signal.signal(signal.SIGINT, previous)
+        for current, handler in previous.items():
+            signal.signal(current, handler)
 
 
 def main(argv=None):
