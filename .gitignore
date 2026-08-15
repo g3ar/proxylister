@@ -16,6 +16,12 @@ env/
 .DS_Store
 .aider*
 .codex/
+
+# Local diagnostic captures
+*.log
+*-debug.txt
+*-log.txt
+
 working*
 proxylister.db
 proxylister.db-wal
