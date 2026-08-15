@@ -19,6 +19,8 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, os.fspath(SCRIPT_DIR))
 
+LIVE_MAX_LATENCY_MS = 5000
+
 from buildlib.core import BuildError, run, tail  # noqa: E402
 
 
@@ -208,7 +210,7 @@ def _live_list_smoke(
             progress_fd, slave_fd = pty.openpty()
             stderr_target = slave_fd
         process = subprocess.Popen(
-            [executable, "list"],
+            [executable, "list", "--max-latency", str(LIVE_MAX_LATENCY_MS)],
             cwd=runtime,
             env=environment,
             stdout=stdout,

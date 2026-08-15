@@ -114,6 +114,9 @@ python3 release/smoke.py live release/bin/linux/proxylister
 The live list check fetches the real candidate set, starts checking it, waits
 until at least two valid proxies have been found, requests the normal bounded
 `Ctrl+C` shutdown, and requires stdout to match `working_proxies.txt` exactly.
+It uses a relaxed 5000 ms acceptance ceiling so this cross-platform output gate
+does not depend on the route latency of a particular build guest; the product's
+configured default is unchanged.
 The minimum can be overridden with `--minimum-proxies` when diagnosing a live
 environment. Its list and monitor logs remain in
 `release/.work/local-linux/logs/live-list.log` and `live-monitor.log`, including
