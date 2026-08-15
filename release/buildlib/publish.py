@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import re
 import tarfile
 import zipfile
@@ -79,9 +80,11 @@ def create_release_packages(root: Path, version: str) -> list[Path]:
         package = destination / f"{stem}{suffix}"
         source = root / "release/bin" / platform_name
         if platform_name == "linux":
-            with tarfile.open(package, "w:gz") as archive:
-                for name in PACKAGE_FILES[platform_name]:
-                    archive.add(source / name, arcname=f"{stem}/{name}")
+            with package.open("wb") as package_file:
+                with gzip.GzipFile(fileobj=package_file, mode="wb", mtime=0) as compressed:
+                    with tarfile.open(fileobj=compressed, mode="w") as archive:
+                        for name in PACKAGE_FILES[platform_name]:
+                            archive.add(source / name, arcname=f"{stem}/{name}")
         else:
             with zipfile.ZipFile(package, "w", compression=zipfile.ZIP_DEFLATED) as archive:
                 for name in PACKAGE_FILES[platform_name]:

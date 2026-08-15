@@ -300,6 +300,18 @@ class PublicationTests(unittest.TestCase):
             with self.assertRaisesRegex(BuildError, "manifest source_commit"):
                 validate_release_artifacts(root, "1.0.1", "b" * 40)
 
+    def test_linux_package_is_reproducible(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._artifacts(root)
+            with patch("gzip.time.time", return_value=1):
+                first = create_release_packages(root, "1.0.1")[0].read_bytes()
+            with patch("gzip.time.time", return_value=2):
+                second = create_release_packages(root, "1.0.1")[0].read_bytes()
+
+            self.assertEqual(first, second)
+            self.assertEqual(int.from_bytes(first[4:8], "little"), 0)
+
     def test_publication_creates_a_new_release_without_clobbering_assets(self) -> None:
         root = Path("/project")
         packages = [Path("/packages/linux.tar.gz"), Path("/packages/SHA256SUMS")]
