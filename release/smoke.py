@@ -253,6 +253,12 @@ def _live_list_smoke(
                         f"live list did not find {minimum} valid proxies within {timeout}s"
                     )
             if process.poll() is None:
+                stderr.write(
+                    f"\nObserved {observed_valid} valid proxies; requesting graceful interruption.\n".encode(
+                        "utf-8"
+                    )
+                )
+                stderr.flush()
                 if os.name == "nt":
                     process.send_signal(signal.CTRL_BREAK_EVENT)
                 else:
