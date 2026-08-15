@@ -565,6 +565,12 @@ and separate worktree. Both binaries must eventually be built from the same
 clean commit and pass native automated tests. Manual TUI acceptance happens
 before the user declares a release ready and is not part of the release
 pipeline. See `BUILD.md` for the human-facing workflow and current status.
+After both platform gates pass and the `vVERSION` tag identifies that clean
+artifact commit, `python3 release/build.py publish` is the sole publication
+path. It must verify both manifests/checksum sets before creating immutable
+Linux and Windows archives and uploading them with their archive checksum file
+to the new GitHub Release; never clobber an existing published release
+implicitly.
 
 ## Git collaboration policy
 

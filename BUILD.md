@@ -17,7 +17,7 @@ they do not need this document.
 | Clean checksummed PVE release snapshot | Implemented with `--release` |
 | Windows ready-state template | Implemented and validated on VMID 9002 |
 | Windows 11 PVE native build, offline smoke, and live smoke | Implemented |
-| Release publication | Not implemented |
+| GitHub Release packaging and publication | Implemented |
 
 Do not describe a planned stage as operational. Update this table when a stage
 actually becomes usable.
@@ -368,3 +368,29 @@ guards.
 Release publication and tagging remain deferred until both platform binaries
 pass their native gates. Manual TUI acceptance happens before the user declares
 a release ready and is not part of release automation.
+
+## Publish a GitHub Release
+
+Publication is a separate retryable step after the clean all-platform build so
+an upload failure never requires rebuilding the native artifacts:
+
+```bash
+python3 release/build.py build all --pve --release
+python3 release/build.py publish
+```
+
+`publish` requires an authenticated official GitHub CLI (`gh auth login`), a
+clean worktree, and a `vVERSION` tag. It verifies both platform checksum sets
+and requires both manifests to identify that tag's clean commit and version.
+This permits retrying publication after a later tooling-only commit without
+rebuilding or retagging the binaries. It then creates these files under
+`release/.work/publish/` and uploads them to a new GitHub Release:
+
+- `proxylister-VERSION-linux-x86_64.tar.gz`;
+- `proxylister-VERSION-windows-x86_64.zip`;
+- `SHA256SUMS` covering both archives.
+
+Each platform archive contains its executable, `README.md`, `LICENSE`,
+`MANIFEST.txt`, and its platform-level `SHA256SUMS`. Publication fails closed
+when the GitHub Release already exists; it never silently replaces published
+assets.

@@ -12,15 +12,21 @@ cloning.
 
 ## Quick start with a downloaded binary
 
-Download the Linux archive and its checksum file from the project's
-[GitHub Releases](https://github.com/g3ar/proxylister/releases) page, extract
-all files into one directory, verify them, then run:
+Download the archive for your platform and `SHA256SUMS` from the project's
+[GitHub Releases](https://github.com/g3ar/proxylister/releases) page. Verify the
+download before extracting it. For Linux:
 
 ```bash
-sha256sum -c SHA256SUMS
+sha256sum -c SHA256SUMS --ignore-missing
+tar -xzf proxylister-*-linux-x86_64.tar.gz
+cd proxylister-*-linux-x86_64
 chmod +x proxylister
 ./proxylister
 ```
+
+Windows releases use `proxylister-VERSION-windows-x86_64.zip`; verify its hash
+against `SHA256SUMS`, extract it, and run `proxylister.exe` from the extracted
+directory.
 
 Keep `proxylister`, `README.md`, and `LICENSE` together. The directory containing
 the executable must be writable: on first use ProxyLister creates

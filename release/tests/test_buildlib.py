@@ -9,6 +9,7 @@ import tarfile
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,6 +19,8 @@ sys.path.insert(0, os.fspath(RELEASE))
 
 from buildlib.core import BuildError, promote_directory, verify_checksums, write_checksums
 from buildlib.pve import PVEManager, SSHConfig, configured_pve_destination
+from buildlib import publish
+from buildlib.publish import create_release_packages, validate_release_artifacts
 from buildlib.provision import WINDOWS_MEDIA, WindowsProvisioner
 from buildlib.source import create_snapshot, verify_snapshot
 from smoke import _assert_matching_proxy_output
@@ -242,6 +245,84 @@ class ArtifactTests(unittest.TestCase):
             promote_directory(source, root / "bin/linux")
             self.assertEqual((windows / "proxylister.exe").read_text(), "windows")
             self.assertEqual((root / "bin/linux/proxylister").read_text(), "linux")
+
+
+class PublicationTests(unittest.TestCase):
+    def _artifacts(self, root: Path, version: str = "1.0.1", commit: str = "a" * 40) -> None:
+        for platform_name, executable in (
+            ("linux", "proxylister"),
+            ("windows", "proxylister.exe"),
+        ):
+            directory = root / "release/bin" / platform_name
+            directory.mkdir(parents=True)
+            (directory / executable).write_bytes(b"binary")
+            (directory / "README.md").write_text("readme\n")
+            (directory / "LICENSE").write_text("license\n")
+            (directory / "MANIFEST.txt").write_text(
+                f"version={version}\nsource_commit={commit}\nsource_tree=clean\n"
+            )
+            write_checksums(
+                directory, [executable, "README.md", "LICENSE", "MANIFEST.txt"]
+            )
+
+    def test_packages_contain_each_verified_platform_distribution(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._artifacts(root)
+            validate_release_artifacts(root, "1.0.1", "a" * 40)
+            packages = create_release_packages(root, "1.0.1")
+
+            self.assertEqual(
+                [path.name for path in packages],
+                [
+                    "proxylister-1.0.1-linux-x86_64.tar.gz",
+                    "proxylister-1.0.1-windows-x86_64.zip",
+                    "SHA256SUMS",
+                ],
+            )
+            with tarfile.open(packages[0], "r:gz") as archive:
+                self.assertIn(
+                    "proxylister-1.0.1-linux-x86_64/proxylister",
+                    archive.getnames(),
+                )
+            with zipfile.ZipFile(packages[1]) as archive:
+                self.assertIn(
+                    "proxylister-1.0.1-windows-x86_64/proxylister.exe",
+                    archive.namelist(),
+                )
+            verify_checksums(packages[0].parent)
+
+    def test_publication_rejects_artifacts_from_another_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._artifacts(root)
+            with self.assertRaisesRegex(BuildError, "manifest source_commit"):
+                validate_release_artifacts(root, "1.0.1", "b" * 40)
+
+    def test_publication_creates_a_new_release_without_clobbering_assets(self) -> None:
+        root = Path("/project")
+        packages = [Path("/packages/linux.tar.gz"), Path("/packages/SHA256SUMS")]
+        with patch.object(publish, "require_commands"), patch.object(
+            publish, "git_identity", return_value=("b" * 40, "clean")
+        ), patch.object(
+            publish, "_project_version", return_value="1.0.1"
+        ), patch.object(
+            publish, "output", return_value="a" * 40
+        ), patch.object(
+            publish, "validate_release_artifacts"
+        ) as validator, patch.object(
+            publish, "create_release_packages", return_value=packages
+        ), patch.object(
+            publish, "run"
+        ) as runner:
+            self.assertEqual(publish.publish_release(root), packages)
+
+        validator.assert_called_once_with(root, "1.0.1", "a" * 40)
+        command = runner.call_args.args[0]
+        self.assertEqual(command[:4], ["gh", "release", "create", "v1.0.1"])
+        self.assertIn("--verify-tag", command)
+        self.assertIn("--generate-notes", command)
+        self.assertNotIn("--clobber", command)
 
 
 class WindowsProvisionTests(unittest.TestCase):

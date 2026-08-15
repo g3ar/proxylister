@@ -21,13 +21,14 @@ from buildlib.pipelines import (  # noqa: E402
     pve_windows_build,
 )
 from buildlib.pve import PVELock, SSHPVE, SSHConfig  # noqa: E402
+from buildlib.publish import publish_release  # noqa: E402
 from buildlib.source import create_snapshot  # noqa: E402
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(
-        dest="command", required=True, metavar="{build,provision}"
+        dest="command", required=True, metavar="{build,provision,publish}"
     )
 
     build = commands.add_parser("build", help="build and validate a native executable")
@@ -44,6 +45,9 @@ def _parser() -> argparse.ArgumentParser:
     provision.add_argument("target", choices=("linux", "windows"))
     provision.add_argument("--check-only", action="store_true")
     provision.add_argument("--ssh-public-key", type=Path)
+    commands.add_parser(
+        "publish", help="package verified binaries and create the tagged GitHub release"
+    )
     build.add_argument(
         "--release",
         action="store_true",
@@ -195,6 +199,10 @@ def main(argv: list[str] | None = None) -> int:
             return _build(args)
         if args.command == "provision":
             return _provision_remote(args)
+        if args.command == "publish":
+            for package in publish_release(ROOT):
+                print(f"Package: {package}")
+            return 0
         if args.command == "_provision_host":
             from buildlib.provision import provision_host
 
