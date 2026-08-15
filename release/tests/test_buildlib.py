@@ -272,6 +272,7 @@ class PublicationTests(unittest.TestCase):
             validate_release_artifacts(root, "1.0.1", "a" * 40)
             packages = create_release_packages(root, "1.0.1")
 
+            self.assertEqual(packages[0].parent, root / "release/bin/packages")
             self.assertEqual(
                 [path.name for path in packages],
                 [

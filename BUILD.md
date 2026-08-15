@@ -43,6 +43,7 @@ Platform outputs are independent:
 ```text
 release/bin/linux/
 release/bin/windows/
+release/bin/packages/
 ```
 
 The Linux executable is named `proxylister`; the Windows executable is named
@@ -51,7 +52,8 @@ directory or executable name. Each platform directory carries its own
 `README.md`, `LICENSE`, `MANIFEST.txt`, and `SHA256SUMS`; OS, architecture,
 version, source identity, and build-tool identity belong in the executable
 metadata and that platform's manifest. A platform build may replace only its
-own output directory and must preserve the other platform's successful output.
+own output directory and must preserve the other platform's successful output
+and packaged release archives.
 
 Generated environments, VM images, credentials, artifacts, and logs are local
 state and must not be committed. `pyproject.toml` remains the only project and
@@ -383,8 +385,9 @@ python3 release/build.py publish
 clean worktree, and a `vVERSION` tag. It verifies both platform checksum sets
 and requires both manifests to identify that tag's clean commit and version.
 This permits retrying publication after a later tooling-only commit without
-rebuilding or retagging the binaries. It then creates these files under
-`release/.work/publish/` and uploads them to a new GitHub Release:
+rebuilding or retagging the binaries. It then creates these files under the
+persistent ignored output directory `release/bin/packages/` and uploads them to
+a new GitHub Release:
 
 - `proxylister-VERSION-linux-x86_64.tar.gz`;
 - `proxylister-VERSION-windows-x86_64.zip`;

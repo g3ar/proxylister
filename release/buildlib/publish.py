@@ -70,7 +70,7 @@ def validate_release_artifacts(root: Path, version: str, commit: str) -> None:
 
 
 def create_release_packages(root: Path, version: str) -> list[Path]:
-    destination = root / "release/.work/publish"
+    destination = root / "release/bin/packages"
     remove_tree(destination)
     destination.mkdir(parents=True)
     packages: list[Path] = []

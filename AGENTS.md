@@ -367,6 +367,9 @@ Successful platform artifacts are isolated under `release/bin/linux/` and
 executable names. Put those identities in each executable's metadata and in
 that platform's own manifest. Each platform owns and may replace only its own
 output directory and must preserve the other platform's artifacts.
+`release/bin/packages/` stores the finished versioned Linux and Windows
+archives plus their shared checksum file; platform builds preserve it and only
+the publication packager replaces it.
 
 `python3 release/build.py build linux` always runs deterministic offline frozen
 smoke. `python3 release/smoke.py live release/bin/linux/proxylister` is a
