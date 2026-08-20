@@ -23,7 +23,8 @@ class CleanupTests(unittest.TestCase):
                 (home / name).write_text("generated")
             for name in (
                 "proxydb/proxylister.db", "proxydb/proxylister.db-wal",
-                "proxydb/proxylister.db-shm", "geodb/geoip.mmdb", "geodb/version",
+                "proxydb/proxylister.db-shm", "proxydb/browser-capabilities.json",
+                "geodb/geoip.mmdb", "geodb/version",
             ):
                 path = home / name
                 path.parent.mkdir(exist_ok=True)

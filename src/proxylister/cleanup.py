@@ -19,6 +19,7 @@ RUNTIME_FILES = (
     "proxydb/proxylister.db",
     "proxydb/proxylister.db-wal",
     "proxydb/proxylister.db-shm",
+    "proxydb/browser-capabilities.json",
     "proxylister.db",
     "proxylister.db-wal",
     "proxylister.db-shm",

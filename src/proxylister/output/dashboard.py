@@ -74,7 +74,7 @@ class ProxyMonitorApp(App):
 
     def __init__(
         self, engine: MonitorEngine, *, stable_only=False, autostart=True,
-        browser="auto", browser_url="about:blank",
+        browser="auto", browsers=(), browser_url="about:blank",
     ):
         super().__init__()
         self.engine = engine
@@ -89,6 +89,7 @@ class ProxyMonitorApp(App):
         self.cells_by_key: dict[str, tuple] = {}
         self.completed_cycle = 0
         self.browser = browser
+        self.browsers = tuple(browsers)
         self.browser_url = browser_url
         self.columns = self.COLUMNS
         self.browser_process = None
@@ -442,10 +443,17 @@ class ProxyMonitorApp(App):
         if row is None:
             self.notify("No proxy selected", severity="warning")
             return
+        if not self.browsers:
+            self.notify(
+                "No verified interactive browser; run ./proxylister detect_browsers",
+                severity="error",
+                timeout=8,
+            )
+            return
         self.action_clear_selection()
         try:
             family, self.browser_process = launch_browser_session(
-                self.browser, row.key[0], row.key[1], self.browser_url
+                self.browser, self.browsers, row.key[0], row.key[1], self.browser_url
             )
         except BrowserUnavailable as error:
             self.notify(str(error), severity="error", timeout=8)

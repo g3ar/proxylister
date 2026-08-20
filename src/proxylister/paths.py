@@ -90,3 +90,8 @@ def geoip_version_path() -> Path:
 def working_proxies_path() -> Path:
     """Return the plain-text output file written by the ``list`` command."""
     return tool_home() / "working_proxies.txt"
+
+
+def browser_capabilities_path() -> Path:
+    """Return the ignored cache populated by ``detect_browsers``."""
+    return _runtime_directory("proxydb") / "browser-capabilities.json"

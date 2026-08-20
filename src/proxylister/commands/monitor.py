@@ -22,6 +22,7 @@ Examples::
 
 import argparse
 
+from proxylister.browser_capabilities import load_browser_capabilities
 from proxylister.config import (
     load_config,
     positive_float,
@@ -84,10 +85,12 @@ def main(argv=None):
     parser = build_parser(settings=settings)
     args = parser.parse_args(argv)
     repository = StateRepository(database_path())
+    capabilities = load_browser_capabilities()
     try:
         ProxyMonitorApp(
             engine_from_args(args, repository, settings),
             browser=settings.browser,
+            browsers=capabilities.interactive if capabilities is not None else (),
             browser_url=args.url or "about:blank",
         ).run()
     finally:

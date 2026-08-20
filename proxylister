@@ -26,6 +26,7 @@ HELP = """Usage: ./proxylister <command> [options]
 Commands:
   list       Find and print working proxies (default)
   monitor    Monitor proxies until they meet stability criteria
+  detect_browsers  Detect browsers supported on this host
   help       Show this help
 
 Options:
@@ -52,7 +53,7 @@ def _command(argv: list[str]) -> tuple[str, list[str]]:
         return "list", []
     first, remaining = argv[0], argv[1:]
     commands = {
-        "list", "monitor", "help", "-h", "--help", "--version",
+        "list", "monitor", "detect_browsers", "help", "-h", "--help", "--version",
         "--about", "--abut", "--clear",
     }
     if first in commands:
@@ -118,7 +119,9 @@ def main(argv: list[str] | None = None) -> int:
     if command == "--clear":
         _replace_process(Path(sys.executable), ["-m", "proxylister.cleanup"], root)
         return 0
-    if command not in {"list", "monitor", "--version", "--about", "--abut"}:
+    if command not in {
+        "list", "monitor", "detect_browsers", "--version", "--about", "--abut",
+    }:
         print(f"proxylister: unknown command: {command}\n", file=sys.stderr)
         print(HELP, end="", file=sys.stderr)
         return 2

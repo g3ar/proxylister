@@ -28,8 +28,9 @@ ProxyLister discovers public HTTP, SOCKS4, and SOCKS5 proxies, validates them
 through real HTTPS requests, measures latency, resolves the observed exit IP
 through a locally downloaded GeoIP database, and monitors useful candidates in
 a Textual terminal UI until they qualify as stable. Selenium is installed with
-the project but used only for explicit browser validation or an interactive
-disposable browser session.
+the project but used only for explicit browser validation and host capability
+probes. Interactive disposable browser sessions are launched natively so the
+user can continue using the window without Selenium automation markers.
 
 ## Design principle: KISS
 
@@ -71,6 +72,9 @@ Modes:
 
 - `list` — one-shot discovery and output; this is the default mode;
 - `monitor` — continuous checking with an interactive Textual dashboard.
+
+The maintenance command `detect_browsers` explicitly refreshes browser
+capabilities for the current host.
 
 Keep the CLI small. The intentional public options are:
 
@@ -186,6 +190,7 @@ src/proxylister/output/             stdout/Rich/Textual presentation
 src/proxylister/monitoring.py       UI-independent monitoring engine
 src/proxylister/geoip.py            DB-IP download and local lookup
 src/proxylister/browser*.py         disposable interactive sessions
+src/proxylister/browser_capabilities.py  shared detection and ignored host cache
 tests/                             mocked, offline unittest suite
 ```
 
@@ -232,9 +237,26 @@ through every proxy. Do not invoke Selenium for continuous URL checks. HTTP 403
 is accepted in monitor/list URL reachability because anti-bot sites may remain
 usable in a browser; other HTTP errors fail the complete check.
 
-`--browser-check` is explicit Selenium validation in `list`. The monitor's `b`
-action launches Chrome or Firefox with a temporary isolated profile and must
-not touch the user's primary browser profile.
+`--browser-check` is explicit Selenium validation in `list`. Browser selection
+comes from one shared detected capability cache. Selenium detection explicitly
+tries Chrome/Chromium, Firefox, Edge, and Safari and lets Selenium Manager
+resolve compatible drivers. Headless support is recorded separately; Safari is
+headed-only on macOS. The monitor's `b` action launches Chrome/Chromium,
+Firefox, or Edge natively with a temporary isolated profile and must not touch
+the user's primary browser profile.
+
+`BROWSER=auto` is the portable default in `proxylister.conf`; a strict family
+or ordered comma-separated fallback is also valid. Host facts live only in the
+ignored `proxydb/browser-capabilities.json`. On the first normal run, detect
+once and cache even an empty result. Do not retry an empty valid cache on every
+startup: require `detect_browsers` after browser installation or configuration.
+Any detected Selenium family unlocks Selenium work, any detected interactive
+family unlocks `b`, and headless work requires the separate headless capability.
+Keep Selenium Manager network waits bounded and prevent implicit full-browser
+downloads by default; browsers remain external host dependencies.
+Frozen launch paths must temporarily restore the system dynamic-library search
+before Selenium Manager, drivers, or native browsers start, then restore the
+PyInstaller lookup for the parent process.
 
 Every proxy check must use a short-lived Requests session and close responses
 and sessions on all paths. A shared Requests session fed unlimited proxy URLs
@@ -286,6 +308,7 @@ proxydb/
   proxylister.db-wal
   proxylister.db-shm
   proxylister.lock
+  browser-capabilities.json
 geodb/
   geoip.mmdb
   version

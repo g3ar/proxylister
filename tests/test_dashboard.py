@@ -40,7 +40,7 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_monitor_uses_custom_shortcut_footer(self):
-        app = ProxyMonitorApp(Mock(), autostart=False)
+        app = ProxyMonitorApp(Mock(), autostart=False, browsers=("chrome",))
 
         async with app.run_test() as pilot:
             await pilot.pause()
@@ -146,7 +146,7 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(table.show_cursor)
 
     async def test_repeated_click_and_browser_action_release_selection(self):
-        app = ProxyMonitorApp(Mock(), autostart=False)
+        app = ProxyMonitorApp(Mock(), autostart=False, browsers=("chrome",))
         row = MonitorRow(
             key=("http", "192.0.2.1:80"), state="PROBATION",
             alive_seconds=30, checks=2, required_checks=5, streak=2,
@@ -201,9 +201,36 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
             with patch(
                 "proxylister.output.dashboard.launch_browser_session",
                 return_value=("Chrome", process),
-            ):
+            ) as launch:
                 app.action_browser()
             self.assertFalse(table.show_cursor)
+            launch.assert_called_once_with(
+                "auto", ("chrome",), "http", "192.0.2.1:80", "about:blank"
+            )
+
+    async def test_browser_action_stays_blocked_until_detection_finds_a_browser(self):
+        app = ProxyMonitorApp(Mock(), autostart=False, browsers=())
+        row = MonitorRow(
+            key=("http", "192.0.2.1:80"), state="PROBATION",
+            alive_seconds=30, checks=2, required_checks=5, streak=2,
+            success_rate=1, median_latency=100, p95_latency=120, jitter=10,
+            country="France", blockers=("checks",),
+            connection="http://192.0.2.1:80",
+        )
+        snapshot = MonitorSnapshot(1, 1, 1, 0, 1, "waiting", 10, (row,))
+
+        async with app.run_test(size=(80, 12)) as pilot:
+            app.receive_snapshot(snapshot)
+            await pilot.pause()
+            table = app.query_one(DataTable)
+            await pilot.press("down")
+            self.assertTrue(table.show_cursor)
+            with patch(
+                "proxylister.output.dashboard.launch_browser_session"
+            ) as launch:
+                app.action_browser()
+            launch.assert_not_called()
+            self.assertTrue(table.show_cursor)
 
     async def test_status_shows_activity_and_only_nondefault_filters(self):
         app = ProxyMonitorApp(Mock(), autostart=False)

@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 
 import requests
 
+from proxylister.browser_capabilities import BrowserCapabilities
 from proxylister import config
 from proxylister import http
 from proxylister.commands import list as list_command
@@ -186,7 +187,8 @@ class ProxyLibraryTests(unittest.TestCase):
                 return self.executor.shutdown(**kwargs)
 
         settings = Mock(
-            url=None, max_latency=500, workers=2, timeout=1, samples=1
+            url=None, max_latency=500, workers=2, timeout=1, samples=1,
+            browser="auto",
         )
         candidates = [("http", f"192.0.2.{index}:80") for index in range(1, 4)]
 
@@ -209,6 +211,13 @@ class ProxyLibraryTests(unittest.TestCase):
         ), patch.object(
             list_command, "browser_check", side_effect=browser_check
         ), patch.object(
+            list_command,
+            "load_browser_capabilities",
+            return_value=BrowserCapabilities(
+                "2026-08-20T00:00:00Z", "linux", ("chrome",),
+                ("chrome",), ("chrome",),
+            ),
+        ), patch.object(
             list_command.concurrent.futures, "ThreadPoolExecutor", TrackingBrowserExecutor
         ), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             runner = threading.Thread(
@@ -228,6 +237,30 @@ class ProxyLibraryTests(unittest.TestCase):
 
         self.assertFalse(runner.is_alive())
         self.assertEqual(browser_submissions, len(candidates))
+
+    def test_browser_validation_is_blocked_without_a_matching_cached_capability(self):
+        settings = Mock(
+            url=None, max_latency=500, workers=2, timeout=1, samples=1,
+            browser="firefox",
+        )
+        empty = BrowserCapabilities(
+            "2026-08-20T00:00:00Z", "linux", ("chrome",), ("chrome",), ()
+        )
+        with patch.object(
+            list_command, "load_config", return_value=settings
+        ), patch.object(
+            list_command, "load_browser_capabilities", return_value=empty
+        ), patch.object(
+            list_command, "fetch_all_proxies"
+        ) as fetch, contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(
+                list_command.main([
+                    "--url", "https://example.com", "--browser-check", "--headless"
+                ]),
+                1,
+            )
+        fetch.assert_not_called()
 
     def test_check_proxy_uses_median_complete_duration(self):
         response = FakeResponse(payload={"ip": "203.0.113.20"})

@@ -2,10 +2,11 @@
 
 ProxyLister finds public HTTP, SOCKS4, and SOCKS5 proxies, verifies them through a real HTTPS connection, measures latency, identifies the exit IP and country, and can continue monitoring promising proxies until they prove stable.
 
-The project has one entrypoint and two modes:
+The project has one entrypoint, two working modes, and one host setup command:
 
 - `list` performs a single scan and prints usable proxy addresses;
 - `monitor` continuously checks proxies in an interactive terminal interface.
+- `detect_browsers` refreshes the browsers usable on the current machine.
 
 The default mode is `list`, so the root Python launcher works immediately after
 cloning.
@@ -44,8 +45,8 @@ Requirements:
 - Linux or Windows;
 - Python 3.10 or newer with the `venv` module;
 - internet access;
-- Chrome or Chromium only when Selenium validation is requested;
-- Chrome/Chromium or Firefox for the monitor's interactive browser action.
+- Chrome/Chromium, Firefox, Edge, or Safari when Selenium validation is requested;
+- Chrome/Chromium, Firefox, or Edge for the monitor's interactive browser action.
 
 Clone the project and run it:
 
@@ -73,6 +74,7 @@ Useful help commands:
 ./proxylister --help
 ./proxylister list --help
 ./proxylister monitor --help
+./proxylister detect_browsers
 ./proxylister --version
 ./proxylister --about
 ```
@@ -258,11 +260,32 @@ selected.
 
 - Chrome/Chromium uses incognito mode and a temporary user-data directory.
 - Firefox uses private mode and a generated temporary profile.
+- Edge uses InPrivate mode and a temporary user-data directory.
 - The regular browser profile, cookies, history, and proxy settings are not modified.
 - Only one browser session can be launched by one monitor at a time.
 - Temporary profile data is removed after the launched browser closes.
 
-`MONITOR_BROWSER` in `proxylister.conf` selects `auto`, `chrome`, or `firefox`. In `auto` mode, Chrome/Chromium is preferred and Firefox is used as a fallback.
+`BROWSER` in `proxylister.conf` controls both Selenium validation and `b`. Use
+`auto`, one strict family such as `firefox`, or an ordered fallback such as
+`firefox,chrome,edge`. `chrome` also covers Chromium. Safari can be selected
+for Selenium on macOS, but it cannot provide the isolated per-session proxy
+contract required by `b`.
+
+On the first normal run ProxyLister checks every supported browser family and
+saves the host-specific result in `proxydb/browser-capabilities.json`. Any
+verified Selenium browser enables `--browser-check`; any verified native
+interactive browser enables `b`. Headless validation requires a browser that
+also passed the headless probe. An empty result is cached and is not retried on
+every startup. After installing, removing, or reconfiguring a browser, refresh
+it explicitly:
+
+```bash
+./proxylister detect_browsers
+```
+
+Selenium Manager performs the Selenium/browser compatibility check and obtains
+a compatible driver when needed. Browser discovery failures are reported as
+warnings; ordinary proxy listing and monitoring remain available.
 
 Private browsing isolates the temporary session from the main profile. It is not a complete anonymity guarantee.
 
@@ -352,7 +375,7 @@ The parser is intentionally strict. Unknown keys, duplicate keys, missing requir
 | `MONITOR_ALIVE_FAILURE_TOLERANCE` | Hard failures tolerated while retaining `STABLE` |
 | `MONITOR_DEGRADED_AFTER` | Failed seconds before probation becomes degraded |
 | `MONITOR_RETENTION_TIME` | Seconds to track proxies no longer advertised by ProxyScrape |
-| `MONITOR_BROWSER` | Browser used by `b`: `auto`, `chrome`, or `firefox` |
+| `BROWSER` | Shared browser preference: `auto`, one family, or an ordered comma-separated fallback |
 
 The comments inside `proxylister.conf` describe valid ranges and defaults in more detail.
 
@@ -373,6 +396,7 @@ proxydb/
   proxylister.db
   proxylister.db-wal
   proxylister.db-shm
+  browser-capabilities.json
   proxylister.lock
 
 geodb/
@@ -426,11 +450,17 @@ failure in its status line, and retries discovery automatically.
 
 ### Browser validation fails
 
-Ensure Chrome or Chromium is installed. Use `--headless` when no graphical desktop is available. Selenium Manager may need internet access to obtain a compatible driver.
+Run `./proxylister detect_browsers` and check whether at least one family lists
+`selenium`; `--headless` additionally requires the `headless` capability.
+Install or configure Chrome/Chromium, Firefox, Edge, or Safari and run the
+command again. Selenium Manager may need internet access to obtain a compatible
+driver.
 
 ### The `b` action cannot find a browser
 
-Install Chrome, Chromium, or Firefox, or set `MONITOR_BROWSER` to a browser that is present on the host.
+Run `./proxylister detect_browsers` and check for an `interactive` capability.
+Install Chrome/Chromium, Firefox, or Edge, then refresh detection. Also verify
+that `BROWSER` is `auto` or includes that family.
 
 ### Country differs from a website's result
 

@@ -22,7 +22,15 @@ import sys
 import threading
 
 from proxylister.checking import check_proxy, check_url, connection_string
-from proxylister.checking.browser import MIN_PAGE_LOAD_TIMEOUT, browser_check
+from proxylister.browser_capabilities import (
+    browser_candidates,
+    load_browser_capabilities,
+)
+from proxylister.checking.browser import (
+    MIN_PAGE_LOAD_TIMEOUT,
+    SeleniumBrowserSelector,
+    browser_check,
+)
 from proxylister.config import load_config, positive_float, web_url
 from proxylister.models import ProxyResult
 from proxylister.output.console import console, progress_display
@@ -103,6 +111,22 @@ def main(argv=None):
     args = parser.parse_args(argv)
     validate_args(parser, args)
     page_timeout = max((args.max_latency * 2) / 1000.0, MIN_PAGE_LOAD_TIMEOUT)
+    browser_selector = None
+    if args.browser_check:
+        capabilities = load_browser_capabilities()
+        available = (
+            capabilities.headless if args.headless else capabilities.selenium
+        ) if capabilities is not None else ()
+        candidates = browser_candidates(settings.browser, available)
+        if not candidates:
+            mode = "headless Selenium" if args.headless else "Selenium"
+            console.print(
+                f"[bold red]Error:[/bold red] no verified {mode} browser is available. "
+                "Install or configure a supported browser, then run "
+                "./proxylister detect_browsers."
+            )
+            return 1
+        browser_selector = SeleniumBrowserSelector(candidates)
     console.print("[bold]Fetching proxy lists from ProxyScrape[/bold] (http, socks4, socks5)…")
     try:
         entries = fetch_all_proxies(verbose=True)
@@ -158,7 +182,8 @@ def main(argv=None):
                         result_to_check = valid[browser_submitted]
                         browser_submitted += 1
                         browser_future = browser_pool.submit(
-                            browser_check, result_to_check, args.url, page_timeout, args.headless
+                            browser_check, result_to_check, args.url, page_timeout,
+                            args.headless, browser_selector,
                         )
                     status = f"{len(working)} working, {len(valid)} valid"
                     if args.browser_check:
@@ -182,7 +207,8 @@ def main(argv=None):
                         result_to_check = valid[browser_submitted]
                         browser_submitted += 1
                         browser_future = browser_pool.submit(
-                            browser_check, result_to_check, args.url, page_timeout, args.headless
+                            browser_check, result_to_check, args.url, page_timeout,
+                            args.headless, browser_selector,
                         )
                     checked = browser_future.result()
                     if checked:

@@ -111,6 +111,16 @@ def offline_smoke(artifact: Path) -> None:
             "--max-latency",
             "monitor help",
         )
+        _assert_contains(
+            _invoke(executable, "detect_browsers", "--help", env=env),
+            "detect_browsers",
+            "browser detection help",
+        )
+        _assert_contains(
+            _invoke(executable, "_browser_session", "--help", env=env),
+            "--family",
+            "frozen browser-session helper",
+        )
         _assert_contains(config.read_text(encoding="utf-8"), "# preserved by frozen smoke", "config")
 
         (runtime / "proxydb").mkdir()

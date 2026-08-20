@@ -10,6 +10,7 @@ from proxylister.process_lock import AlreadyRunning, ProcessLock
 COMMANDS = {
     "list": "proxylister.commands.list",
     "monitor": "proxylister.commands.monitor",
+    "detect_browsers": "proxylister.commands.detect_browsers",
 }
 
 
@@ -22,6 +23,7 @@ def show_help(stream=None):
 Commands:
   list       Find and print working proxies (default)
   monitor    Monitor proxies until they meet stability criteria
+  detect_browsers  Detect browsers supported on this host
   help       Show this help
 
 Options:
@@ -36,6 +38,10 @@ Run ./proxylister <command> --help for command-specific options.""",
 
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
+    if args and args[0] == "_browser_session":
+        from proxylister.browser_session import main as browser_session
+
+        return browser_session(args[1:])
     if args and args[0] in {"help", "-h", "--help"}:
         show_help()
         return 0
@@ -72,6 +78,27 @@ def main(argv=None):
         if any(arg in {"-h", "--help"} for arg in args):
             return module.main(args)
         with ProcessLock(command):
+            if command == "detect_browsers":
+                return module.main(args)
+            from proxylister.browser_capabilities import (
+                ensure_browser_capabilities,
+                print_detection_report,
+            )
+            from proxylister.config import load_config
+
+            load_config()
+            capabilities, detected, failures = ensure_browser_capabilities(
+                lambda: print(
+                    "Checking browser capabilities "
+                    "(Selenium Manager may download drivers)...",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            )
+            if detected:
+                print_detection_report(
+                    capabilities, failures, stream=sys.stderr
+                )
             from proxylister.geoip import ATTRIBUTION, configure_geoip, ensure_geoip_database
 
             print("Checking local GeoIP database…", file=sys.stderr)

@@ -109,9 +109,25 @@ def _optional_url(value):
 
 
 def _browser(value):
-    if value not in {"auto", "chrome", "firefox"}:
-        raise argparse.ArgumentTypeError("must be auto, chrome, or firefox")
-    return value
+    aliases = {"chromium": "chrome"}
+    browsers = [
+        aliases.get(item.strip().lower(), item.strip().lower())
+        for item in value.split(",")
+    ]
+    supported = {"chrome", "firefox", "edge", "safari"}
+    if not browsers or any(not item for item in browsers):
+        raise argparse.ArgumentTypeError("must contain a browser family")
+    if browsers == ["auto"]:
+        return "auto"
+    if "auto" in browsers:
+        raise argparse.ArgumentTypeError("auto cannot be combined with browser families")
+    if any(item not in supported for item in browsers):
+        raise argparse.ArgumentTypeError(
+            "must contain only auto, chrome, firefox, edge, or safari"
+        )
+    if len(set(browsers)) != len(browsers):
+        raise argparse.ArgumentTypeError("browser families must not be duplicated")
+    return ",".join(browsers)
 
 
 CONFIG_KEYS = {
@@ -130,8 +146,10 @@ CONFIG_KEYS = {
     "MONITOR_ALIVE_FAILURE_TOLERANCE": ("alive_failure_tolerance", nonnegative_int),
     "MONITOR_DEGRADED_AFTER": ("degraded_after", nonnegative_float),
     "MONITOR_RETENTION_TIME": ("retention_time", positive_float),
-    "MONITOR_BROWSER": ("browser", _browser),
+    "BROWSER": ("browser", _browser),
 }
+
+LEGACY_BROWSER_KEY = "MONITOR_BROWSER"
 
 
 def config_path() -> Path:
@@ -160,11 +178,17 @@ def load_config(path: Path | None = None) -> RuntimeConfig:
         if len(tokens) != 1 or "=" not in tokens[0]:
             raise ConfigError(f"{path}:{line_number}: expected KEY=value")
         key, value = tokens[0].split("=", 1)
-        if key not in CONFIG_KEYS:
+        if key not in CONFIG_KEYS and key != LEGACY_BROWSER_KEY:
             raise ConfigError(f"{path}:{line_number}: unknown key {key!r}")
         if key in raw:
             raise ConfigError(f"{path}:{line_number}: duplicate key {key!r}")
         raw[key] = (value, line_number)
+    if "BROWSER" in raw and LEGACY_BROWSER_KEY in raw:
+        raise ConfigError(
+            f"{path}: BROWSER and {LEGACY_BROWSER_KEY} cannot both be present"
+        )
+    if "BROWSER" not in raw and LEGACY_BROWSER_KEY in raw:
+        raw["BROWSER"] = raw.pop(LEGACY_BROWSER_KEY)
     missing = CONFIG_KEYS.keys() - raw.keys()
     if missing:
         raise ConfigError(f"{path}: missing key(s): {', '.join(sorted(missing))}")

@@ -87,6 +87,7 @@ the dashboard renders them and sends user actions to existing services.
 | Change candidate discovery | `src/proxylister/sources/proxyscrape.py` | `tests/test_proxylib.py` |
 | Change HTTP proxy validation | `src/proxylister/checking/proxy.py` | proxy and monitoring tests |
 | Change Selenium validation | `src/proxylister/checking/browser.py` | browser tests |
+| Change browser discovery or capability caching | `src/proxylister/browser_capabilities.py` | capability and CLI tests |
 | Change stability rules | `src/proxylister/stability/` | `tests/test_cli_helpers.py` |
 | Change monitor scheduling or snapshots | `src/proxylister/monitoring.py` | `tests/test_monitoring.py` |
 | Change the TUI table or actions | `src/proxylister/output/dashboard.py` | `tests/test_dashboard.py` |
@@ -109,13 +110,16 @@ src/proxylister/
   config.py                 config parsing and value validation
   paths.py                  clone-local paths and legacy migration
   process_lock.py           advisory per-clone lock
+  external_process.py       frozen-app library-path cleanup for host programs
   geoip.py                  DB-IP download and local lookup
   models.py                 shared result records
   http.py                   bounded Requests session helpers
   browser.py                interactive browser launcher
   browser_session.py        detached temporary-profile helper
+  browser_capabilities.py   shared host detection and ignored capability cache
   about.py                  shared CLI/TUI identity and contributor credits
   commands/
+    detect_browsers.py      explicit host capability refresh
     list.py                 one-shot orchestration and output
     monitor.py              monitor construction and TUI startup
   sources/proxyscrape.py    candidate source adapter
@@ -144,7 +148,7 @@ Generated state is per clone and ignored by Git:
 
 ```text
 .venv/
-proxydb/                    SQLite database, WAL/SHM, and lock metadata
+proxydb/                    SQLite state, lock metadata, and browser capability cache
 geodb/                      GeoIP database and version marker
 ```
 
@@ -189,7 +193,18 @@ make the complete sample unaccepted with `failure_reason="url"`.
 
 Continuous URL checking must stay in Requests. Selenium is used only by
 explicit `list --browser-check`; it runs after lightweight checks and is
-serialized to one Chrome instance.
+serialized to one detected browser instance. Chrome/Chromium, Firefox, Edge,
+and Safari have explicit constructors so Selenium Manager can resolve each
+installed browser and its compatible driver. Safari is a headed macOS
+Selenium capability only. ProxyLister supplies a bounded default for Selenium
+Manager network requests and prevents implicit full-browser downloads while
+honoring an explicit user Selenium Manager configuration.
+
+Frozen builds must restore the system dynamic-library lookup while spawning
+Selenium Manager, WebDriver/browser processes, and the native browser launched
+by the detached helper. PyInstaller deliberately points child processes at its
+private bundle libraries; leaking that lookup into host executables breaks
+otherwise valid Windows and Linux installations.
 
 ### Requests lifecycle invariant
 
@@ -383,9 +398,13 @@ date, `BUILD_DATE` intentionally contains only the project build year.
 Root help runs before environment creation. `--clear` uses the system Python
 because it may delete `.venv` while running.
 
-For a real command, `cli.py` acquires the clone lock, prepares the local GeoIP
-database, configures the reader, and dispatches `list` or `monitor`. Help and
-version do not acquire the lock.
+For a real command, `cli.py` acquires the clone lock. On the first `list` or
+`monitor` run it detects browser capabilities and writes
+`proxydb/browser-capabilities.json`, then prepares the local GeoIP database,
+configures the reader, and dispatches the command. A valid cache, including an
+empty result, prevents automatic retries; `detect_browsers` explicitly refreshes
+it without preparing GeoIP. Help, version, and About do not detect browsers or
+acquire the lock.
 
 ### Configuration
 
@@ -397,6 +416,13 @@ assignments, invalid ranges, and impossible cross-field combinations.
 Technical defaults belong in the config file. Add a CLI option only when users
 reasonably need to change intent for one invocation. When changing the public
 surface, update command help, README examples, and parser-surface tests.
+
+`BROWSER` is a portable preference, not a machine inventory. It accepts
+`auto`, one strict family, or an ordered comma-separated fallback. The ignored
+capability cache is the only authoritative record of what the current host has
+verified for Selenium, headless Selenium, and an isolated native interactive
+session. The former `MONITOR_BROWSER` key remains readable for existing user
+configs but must not be emitted into new configs.
 
 ### Runtime paths and locking
 
@@ -427,9 +453,13 @@ in user documentation.
 
 The monitor's `b` action launches a detached helper so profile cleanup can
 outlive the TUI. Chrome/Chromium receives incognito mode and a temporary user
-data directory. Firefox receives private mode and a generated profile with
-protocol-specific settings. SOCKS4 and SOCKS5 versions are explicit. The
-helper never reads or changes the user's normal browser profile.
+data directory. Edge receives the equivalent InPrivate isolated directory.
+Firefox receives private mode and a generated profile with protocol-specific
+settings. SOCKS4 and SOCKS5 versions are explicit. The helper never reads or
+changes the user's normal browser profile. It intentionally launches the
+browser directly rather than through Selenium so a user can keep interacting
+with the window with fewer automation markers. Safari is excluded because its
+native launcher cannot satisfy this per-session proxy/profile contract.
 
 ### Cleanup
 
@@ -516,6 +546,7 @@ High-risk regression areas are:
 - active/discovery lane independence;
 - incremental TUI rendering and selection preservation;
 - clone locking, cleanup, and legacy path migration;
+- browser capability cache validity and Selenium/native capability separation;
 - disposable browser profile isolation.
 
 ## Handoff checklist

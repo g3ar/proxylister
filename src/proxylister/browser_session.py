@@ -1,9 +1,10 @@
 """Internal lifecycle helper for one disposable proxy browser session.
 
 This is not a public CLI command. It runs outside the Textual process so a
-browser may remain open after the monitor exits. Chrome receives an isolated
-``--user-data-dir``; Firefox receives a generated profile containing only the
-proxy preferences. The temporary directory is deleted after browser exit.
+browser may remain open after the monitor exits. Chromium and Edge receive an
+isolated ``--user-data-dir``; Firefox receives a generated profile containing
+only the proxy preferences. The temporary directory is deleted after browser
+exit.
 """
 
 from __future__ import annotations
@@ -13,6 +14,8 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
+
+from proxylister.external_process import external_program_environment
 
 
 def chrome_command(executable, profile, protocol, address, url):
@@ -25,6 +28,12 @@ def chrome_command(executable, profile, protocol, address, url):
         "--no-default-browser-check",
         url,
     ]
+
+
+def edge_command(executable, profile, protocol, address, url):
+    command = chrome_command(executable, profile, protocol, address, url)
+    command[1] = "--inprivate"
+    return command
 
 
 def write_firefox_preferences(profile: Path, protocol: str, address: str):
@@ -58,7 +67,9 @@ def firefox_command(executable, profile, protocol, address, url):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--family", required=True, choices=("chrome", "firefox"))
+    parser.add_argument(
+        "--family", required=True, choices=("chrome", "firefox", "edge")
+    )
     parser.add_argument("--executable", required=True)
     parser.add_argument("--protocol", required=True, choices=("http", "socks4", "socks5"))
     parser.add_argument("--address", required=True)
@@ -66,9 +77,14 @@ def main(argv=None):
     args = parser.parse_args(argv)
     with tempfile.TemporaryDirectory(prefix="proxylister-browser-") as directory:
         profile = Path(directory)
-        builder = chrome_command if args.family == "chrome" else firefox_command
+        builder = {
+            "chrome": chrome_command,
+            "firefox": firefox_command,
+            "edge": edge_command,
+        }[args.family]
         command = builder(args.executable, profile, args.protocol, args.address, args.url)
-        return subprocess.run(command, check=False).returncode
+        with external_program_environment():
+            return subprocess.run(command, check=False).returncode
 
 
 if __name__ == "__main__":

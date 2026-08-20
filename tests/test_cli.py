@@ -8,6 +8,7 @@ from unittest import mock
 from proxylister import __version__
 from proxylister import about as about_module
 from proxylister.about import AUTHORS, BUILD_DATE, DESCRIPTION, format_about
+from proxylister.browser_capabilities import BrowserCapabilities
 from proxylister import cli
 from proxylister.commands import list as list_command
 from proxylister.commands import monitor
@@ -18,7 +19,7 @@ class TopLevelCliTests(unittest.TestCase):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             self.assertEqual(cli.main(["--help"]), 0)
-        for command in ("list", "monitor"):
+        for command in ("list", "monitor", "detect_browsers"):
             self.assertIn(command, output.getvalue())
         self.assertIn("--clear", output.getvalue())
         self.assertIn("--about", output.getvalue())
@@ -102,6 +103,60 @@ class TopLevelCliTests(unittest.TestCase):
         self.assertEqual(monitor_options, {
             "-h", "--help", "--url", "--max-latency",
         })
+
+    def test_help_version_and_about_do_not_trigger_browser_detection(self):
+        with mock.patch(
+            "proxylister.browser_capabilities.ensure_browser_capabilities"
+        ) as detect, contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main(["--help"]), 0)
+            self.assertEqual(cli.main(["--version"]), 0)
+            self.assertEqual(cli.main(["--about"]), 0)
+        detect.assert_not_called()
+
+    def test_normal_command_runs_first_detection_before_geoip_and_dispatch(self):
+        events = []
+        capabilities = BrowserCapabilities(
+            "2026-08-20T00:00:00Z", "linux", ("chrome",), ("chrome",), ()
+        )
+        geoip_result = mock.Mock(
+            path=Path("geoip.mmdb"), updated=False, warning=None
+        )
+
+        def ensure(on_detect):
+            events.append("detect")
+            on_detect()
+            return capabilities, True, {}
+
+        def prepare_geoip(**_kwargs):
+            events.append("geoip")
+            return geoip_result
+
+        with (
+            mock.patch.object(
+                list_command,
+                "main",
+                side_effect=lambda _args: events.append("command") or 0,
+            ),
+            mock.patch.object(cli, "ProcessLock"),
+            mock.patch("proxylister.config.load_config"),
+            mock.patch(
+                "proxylister.browser_capabilities.ensure_browser_capabilities",
+                side_effect=ensure,
+            ),
+            mock.patch(
+                "proxylister.browser_capabilities.print_detection_report"
+            ) as report,
+            mock.patch(
+                "proxylister.geoip.ensure_geoip_database",
+                side_effect=prepare_geoip,
+            ),
+            mock.patch("proxylister.geoip.configure_geoip"),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(cli.main(["list"]), 0)
+
+        self.assertEqual(events, ["detect", "geoip", "command"])
+        report.assert_called_once()
 
 
 if __name__ == "__main__":

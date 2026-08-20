@@ -22,6 +22,25 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(settings.browser, "auto")
         self.assertIsNone(settings.url)
 
+    def test_browser_preference_accepts_auto_strict_and_ordered_values(self):
+        original = self.source.read_text(encoding="utf-8")
+        self.assertEqual(
+            self._load_text(original.replace("BROWSER=auto", "BROWSER=firefox")).browser,
+            "firefox",
+        )
+        self.assertEqual(
+            self._load_text(
+                original.replace("BROWSER=auto", "BROWSER=firefox,chromium,edge")
+            ).browser,
+            "firefox,chrome,edge",
+        )
+
+    def test_legacy_monitor_browser_remains_readable(self):
+        legacy = self.source.read_text(encoding="utf-8").replace(
+            "BROWSER=auto", "MONITOR_BROWSER=firefox"
+        )
+        self.assertEqual(self._load_text(legacy).browser, "firefox")
+
     def test_inline_comments_are_supported(self):
         text = self.source.read_text(encoding="utf-8").replace(
             "WORKERS=50", "WORKERS=25  # temporary host override"
@@ -35,6 +54,10 @@ class ConfigTests(unittest.TestCase):
             original + "\nWORKERS=2\n",
             original.replace("WORKERS=50\n", ""),
             original.replace("WORKERS=50", "WORKERS=lots"),
+            original.replace("BROWSER=auto", "BROWSER=auto,firefox"),
+            original.replace("BROWSER=auto", "BROWSER=firefox,firefox"),
+            original.replace("BROWSER=auto", "BROWSER=opera"),
+            original + "\nMONITOR_BROWSER=firefox\n",
         )
         for text in variants:
             with self.subTest(text=text[-30:]), self.assertRaises(ConfigError):
